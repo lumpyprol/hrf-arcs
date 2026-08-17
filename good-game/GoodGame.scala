@@ -366,15 +366,16 @@ object GoodGame {
                     }
                 }
             } ~
-            (post & path("notify-turn" / Segment / Segment / Segment / IntNumber)) { case (userId, userSecret, journalId, index) =>
+            (post & path("notify-turn" / Segment / Segment / Segment / Segment / IntNumber)) { case (userId, userSecret, journalId, lobbyId, index) =>
                 decodeRequest {
                     entity(as[String]) { body =>
                         val lines = body.split('\n').toList
                         val metaName = lines.headOption.getOrElse("").take(32).ascii
                         val targets = lines.drop(1).map(_.take(32).ascii).filter(_.nonEmpty).distinct
 
-                        // throws (-> 500) if the caller lacks append rights on this journal, same as the append/read endpoints above
-                        execute(hasRight(userId, userSecret, journalId, "append") {
+                        // any client with the journal open can independently detect a wait transition and
+                        // call this, so require only read access, not append
+                        execute(hasRight(userId, userSecret, journalId, "read") {
                             journals.filter(_.id === journalId).result.head
                         })
 
@@ -390,7 +391,8 @@ object GoodGame {
                                 )
 
                                 val email = execute(users.filter(_.id === targetUserId).map(_.email).result.headOption).flatten
-                                val secret = execute(plays.filter(p => p.journalId === journalId && p.userId === targetUserId).map(_.secret).result.headOption)
+                                // Plays rows are keyed by the lobby journal, not the per-chapter game journal
+                                val secret = execute(plays.filter(p => p.journalId === lobbyId && p.userId === targetUserId).map(_.secret).result.headOption)
 
                                 (email, secret) match {
                                     case (Some(e), Some(s)) if e.nonEmpty =>

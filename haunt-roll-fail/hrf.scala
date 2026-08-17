@@ -723,7 +723,7 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                                 val targets = waiting./(_.asInstanceOf[meta.F])./~(f => users.get(f)).but(user).distinct
 
                                 if (targets.any)
-                                    post(HRF.server.get + "/notify-turn/" + user + "/" + HRF.secret.get + "/" + server.get + "/" + index, (meta.name +: targets).join("\n")) { _ => () }
+                                    post(HRF.server.get + "/notify-turn/" + user + "/" + HRF.secret.get + "/" + server.get + "/" + HRF.lobby.get + "/" + index, (meta.name +: targets).join("\n")) { _ => () }
                             }
 
                     startGame(seating, difficulties, state.selected, self, journal, title.|("%untitled%"), () => names, ServerSwitches, notifyWaiting)
