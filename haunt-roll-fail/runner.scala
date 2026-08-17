@@ -728,8 +728,8 @@ object Runner {
 
                     lines :+= LogLine(nl, actions.num, k == LogKind.Temp)
 
-                    if (k != LogKind.Temp && l.text.nonEmpty)
-                        textLog :+= (actions.num, l.text)
+                    if (k != LogKind.Temp && l.text.exists(_.isLetterOrDigit))
+                        textLog :+= (actions.num, l.text.trim)
 
                     logged += 1
 

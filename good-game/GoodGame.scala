@@ -386,6 +386,20 @@ object GoodGame {
                     }
                 }
             } ~
+            (post & path("register-name" / Segment / Segment)) { case (userId, userSecret) =>
+                decodeRequest {
+                    entity(as[String]) { body =>
+                        val name = body.trim.take(32).safeplus
+                        if (name.nonEmpty)
+                            execute(
+                                users.filter(_.id === userId).filter(_.secret === userSecret)
+                                    .map(_.name)
+                                    .update(name)
+                            )
+                        plain("")
+                    }
+                }
+            } ~
             (post & path("notify-turn" / Segment / Segment / Segment / Segment / IntNumber)) { case (userId, userSecret, journalId, lobbyId, index) =>
                 decodeRequest {
                     entity(as[String]) { body =>
@@ -406,8 +420,6 @@ object GoodGame {
                                 scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(200).asciiplus)
                             else None
                         }
-
-                        println("NOTIFYDEBUG server: notify-turn from " + userId + " journal " + journalId + " lobby " + lobbyId + " index " + index + " targetFactions " + targetFactions + " logEntries " + logEntries.size)
 
                         // any client with the journal open can independently detect a wait transition and
                         // call this, so require only read access, not append
@@ -430,8 +442,6 @@ object GoodGame {
                                 // Plays rows are keyed by the lobby journal, not the per-chapter game journal
                                 val secret = execute(plays.filter(p => p.journalId === lobbyId && p.userId === targetUserId).map(_.secret).result.headOption)
 
-                                println("NOTIFYDEBUG server: target " + targetUserId + " user " + targetUser + " secret " + secret)
-
                                 (targetUser, secret) match {
                                     case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
                                         val since = alreadyIdx.getOrElse(0)
@@ -440,8 +450,6 @@ object GoodGame {
                                     case _ =>
                                 }
                             }
-                            else
-                                println("NOTIFYDEBUG server: target " + targetUserId + " already notified at " + alreadyIdx + " (>= " + index + ")")
                         }
 
                         complete(StatusCodes.Accepted)

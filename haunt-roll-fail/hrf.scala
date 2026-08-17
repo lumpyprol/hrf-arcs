@@ -661,6 +661,7 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                         if (name == value && retries < 3) {
                             setCookie("name", name, Some(3650))
                             postEmail()
+                            post(HRF.server.get + "/register-name/" + user + "/" + HRF.secret.get, name) { _ => () }
                             lj.append($("name", user, name).join(" "))(reread())(postName(name, retries + 1))
                         }
                         else
@@ -720,26 +721,16 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                             (_, _, _) => ()
                         else
                             (waiting, index, textLog) => {
-                                try {
-                                    val allPairs = waiting./(_.asInstanceOf[meta.F])./~(f => users.get(f)./(uid => uid -> meta.factionName(f)))
-                                    val targetPairs = allPairs.%((uid, fname) => uid != user)
-                                    val targets = targetPairs./((uid, fname) => uid).distinct
+                                val allPairs = waiting./(_.asInstanceOf[meta.F])./~(f => users.get(f)./(uid => uid -> meta.factionName(f)))
+                                val targetPairs = allPairs.%((uid, fname) => uid != user)
+                                val targets = targetPairs./((uid, fname) => uid).distinct
 
-                                    scala.scalajs.js.Dynamic.global.console.log("NOTIFYDEBUG waiting=" + waiting + " users=" + users + " self=" + user + " targets=" + targets + " textLogSize=" + textLog.num)
+                                if (targets.any) {
+                                    val body = ("META " + meta.name) +:
+                                        (targetPairs./((uid, fname) => "TARGET " + uid + " " + fname) ++
+                                         textLog./((i, t) => "LOG " + i + "\t" + t.replace("\n", " ").replace("\r", " ")))
 
-                                    if (targets.any) {
-                                        val body = ("META " + meta.name) +:
-                                            (targetPairs./((uid, fname) => "TARGET " + uid + " " + fname) ++
-                                             textLog./((i, t) => "LOG " + i + "\t" + t.replace("\n", " ").replace("\r", " ")))
-
-                                        post(HRF.server.get + "/notify-turn/" + user + "/" + HRF.secret.get + "/" + server.get + "/" + HRF.lobby.get + "/" + index, body.join("\n")) { r =>
-                                            scala.scalajs.js.Dynamic.global.console.log("NOTIFYDEBUG post response: " + r)
-                                        }
-                                    }
-                                }
-                                catch {
-                                    case e : Throwable =>
-                                        scala.scalajs.js.Dynamic.global.console.log("NOTIFYDEBUG exception: " + e.getMessage)
+                                    post(HRF.server.get + "/notify-turn/" + user + "/" + HRF.secret.get + "/" + server.get + "/" + HRF.lobby.get + "/" + index, body.join("\n")) { _ => () }
                                 }
                             }
 
