@@ -24,7 +24,7 @@ import scalajs.js
 import scalajs.js.timers.setTimeout
 
 object Runner {
-    def run(meta : MetaGame)(seating : $[meta.F], options : $[meta.O], resources : Resources, ui : meta.gaming.GameUI, auto : (meta.G, meta.gaming.F) => meta.gaming.AskResult, journal : Journal[meta.gaming.ExternalAction], notifyWaiting : ($[meta.gaming.F], Int) => Unit = (_, _) => ()) {
+    def run(meta : MetaGame)(seating : $[meta.F], options : $[meta.O], resources : Resources, ui : meta.gaming.GameUI, auto : (meta.G, meta.gaming.F) => meta.gaming.AskResult, journal : Journal[meta.gaming.ExternalAction], notifyWaiting : ($[meta.gaming.F], Int, $[(Int, String)]) => Unit = (_, _, _) => ()) {
         import meta.gaming._
 
         sealed trait UIState
@@ -190,6 +190,7 @@ object Runner {
         case class LogLine(block : LazyBlock, action : Int, temp : Boolean)
 
         var lines : $[LogLine] = $
+        var textLog : $[(Int, String)] = $
 
         var state : UIState = UIRead(StartContinue)
 
@@ -727,6 +728,9 @@ object Runner {
 
                     lines :+= LogLine(nl, actions.num, k == LogKind.Temp)
 
+                    if (k != LogKind.Temp && l.text.nonEmpty)
+                        textLog :+= (actions.num, l.text)
+
                     logged += 1
 
                     line = lines.num
@@ -764,7 +768,7 @@ object Runner {
                         ui.wait(self, waitingFor, "z... z... z...".txt)
 
                         if (ff.any)
-                            notifyWaiting(ff, actions.num)
+                            notifyWaiting(ff, actions.num, textLog)
 
                         setTimeout(0) { hrf.web.timed(0)("scrollActionToLatest()") { scrollActionToLatest() } }
                     }

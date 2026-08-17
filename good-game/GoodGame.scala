@@ -102,7 +102,9 @@ object GoodGame {
 
 
     object EmailSender {
-        def sendTurnEmail(to : String, link : String)(implicit system : ActorSystem) {
+        def htmlEscape(s : String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+        def sendTurnEmail(to : String, playerName : String, factionName : String, gameTitle : String, link : String, recentLog : List[String])(implicit system : ActorSystem) {
             import system.dispatcher
 
             val apiKey = sys.env.getOrElse("RESEND_API_KEY", "")
@@ -114,14 +116,32 @@ object GoodGame {
 
             val from = sys.env.getOrElse("RESEND_FROM", "onboarding@resend.dev")
 
-            def jsonEscape(s : String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+            def jsonEscape(s : String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
 
-            val html = "<p>It's your turn! <a href=\"" + link + "\">Click here to play</a>.</p>"
+            val greeting = if (playerName.nonEmpty) playerName else "there"
+            val faction = if (factionName.nonEmpty) factionName else "your faction"
+            val title = if (gameTitle.nonEmpty) gameTitle else "Arcs"
+
+            val subject = faction + ": your turn — " + title
+
+            val logHtml =
+                if (recentLog.nonEmpty)
+                    "<p><b>Since your last turn:</b></p><ul style=\"padding-left:20px;margin:8px 0;\">" +
+                    recentLog.map(l => "<li style=\"margin:2px 0;\">" + htmlEscape(l) + "</li>").mkString("") +
+                    "</ul>"
+                else
+                    ""
+
+            val html =
+                "<p>Hi " + htmlEscape(greeting) + ",</p>" +
+                "<p>It's your turn as <b>" + htmlEscape(faction) + "</b> in <b>" + htmlEscape(title) + "</b>.</p>" +
+                logHtml +
+                "<p><a href=\"" + link + "\">Take your turn &rarr;</a></p>"
 
             val json = "{" +
                 "\"from\":\"" + jsonEscape(from) + "\"," +
                 "\"to\":\"" + jsonEscape(to) + "\"," +
-                "\"subject\":\"It's your turn!\"," +
+                "\"subject\":\"" + jsonEscape(subject) + "\"," +
                 "\"html\":\"" + jsonEscape(html) + "\"" +
             "}"
 
@@ -370,16 +390,32 @@ object GoodGame {
                 decodeRequest {
                     entity(as[String]) { body =>
                         val lines = body.split('\n').toList
-                        val metaName = lines.headOption.getOrElse("").take(32).ascii
-                        val targets = lines.drop(1).map(_.take(32).ascii).filter(_.nonEmpty).distinct
+
+                        val metaName = lines.find(_.startsWith("META ")).map(_.drop(5).take(32).ascii).getOrElse("")
+
+                        val targetFactions = lines.filter(_.startsWith("TARGET ")).flatMap { l =>
+                            val rest = l.drop(7)
+                            val sp = rest.indexOf(' ')
+                            if (sp > 0) Some(rest.take(sp).take(32).ascii -> rest.drop(sp + 1).take(32).ascii) else None
+                        }.filter(_._1.nonEmpty).distinct
+
+                        val logEntries = lines.filter(_.startsWith("LOG ")).flatMap { l =>
+                            val rest = l.drop(4)
+                            val tab = rest.indexOf('\t')
+                            if (tab > 0)
+                                scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(200).asciiplus)
+                            else None
+                        }
+
+                        println("NOTIFYDEBUG server: notify-turn from " + userId + " journal " + journalId + " lobby " + lobbyId + " index " + index + " targetFactions " + targetFactions + " logEntries " + logEntries.size)
 
                         // any client with the journal open can independently detect a wait transition and
                         // call this, so require only read access, not append
-                        execute(hasRight(userId, userSecret, journalId, "read") {
+                        val journal = execute(hasRight(userId, userSecret, journalId, "read") {
                             journals.filter(_.id === journalId).result.head
                         })
 
-                        targets.foreach { targetUserId =>
+                        targetFactions.foreach { case (targetUserId, factionName) =>
                             val alreadyIdx = execute(notifiedTurns.filter(n => n.journalId === journalId && n.userId === targetUserId).map(_.index).result.headOption)
 
                             if (alreadyIdx.forall(_ < index)) {
@@ -390,16 +426,22 @@ object GoodGame {
                                         notifiedTurns += NotifiedTurn(journalId, targetUserId, index)
                                 )
 
-                                val email = execute(users.filter(_.id === targetUserId).map(_.email).result.headOption).flatten
+                                val targetUser = execute(users.filter(_.id === targetUserId).result.headOption)
                                 // Plays rows are keyed by the lobby journal, not the per-chapter game journal
                                 val secret = execute(plays.filter(p => p.journalId === lobbyId && p.userId === targetUserId).map(_.secret).result.headOption)
 
-                                (email, secret) match {
-                                    case (Some(e), Some(s)) if e.nonEmpty =>
-                                        EmailSender.sendTurnEmail(e, url + "/play/" + metaName + "/" + s)
+                                println("NOTIFYDEBUG server: target " + targetUserId + " user " + targetUser + " secret " + secret)
+
+                                (targetUser, secret) match {
+                                    case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
+                                        val since = alreadyIdx.getOrElse(0)
+                                        val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
+                                        EmailSender.sendTurnEmail(u.email.get, u.name, factionName, journal.name, url + "/play/" + metaName + "/" + s, recentLog)
                                     case _ =>
                                 }
                             }
+                            else
+                                println("NOTIFYDEBUG server: target " + targetUserId + " already notified at " + alreadyIdx + " (>= " + index + ")")
                         }
 
                         complete(StatusCodes.Accepted)

@@ -715,15 +715,32 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                         else
                             new ServerJournal[meta.gaming.ExternalAction](meta, HRF.server.get, HRF.user.get, HRF.secret.get, server.get, s => meta.parseActionExternal(s), s => meta.writeActionExternal(s), HRF.paramInt("at") | 999999)
 
-                    val notifyWaiting : ($[meta.gaming.F], Int) => Unit =
+                    val notifyWaiting : ($[meta.gaming.F], Int, $[(Int, String)]) => Unit =
                         if (HRF.replay || HRF.flag("phantom"))
-                            (_, _) => ()
+                            (_, _, _) => ()
                         else
-                            (waiting, index) => {
-                                val targets = waiting./(_.asInstanceOf[meta.F])./~(f => users.get(f)).but(user).distinct
+                            (waiting, index, textLog) => {
+                                try {
+                                    val allPairs = waiting./(_.asInstanceOf[meta.F])./~(f => users.get(f)./(uid => uid -> meta.factionName(f)))
+                                    val targetPairs = allPairs.%((uid, fname) => uid != user)
+                                    val targets = targetPairs./((uid, fname) => uid).distinct
 
-                                if (targets.any)
-                                    post(HRF.server.get + "/notify-turn/" + user + "/" + HRF.secret.get + "/" + server.get + "/" + HRF.lobby.get + "/" + index, (meta.name +: targets).join("\n")) { _ => () }
+                                    scala.scalajs.js.Dynamic.global.console.log("NOTIFYDEBUG waiting=" + waiting + " users=" + users + " self=" + user + " targets=" + targets + " textLogSize=" + textLog.num)
+
+                                    if (targets.any) {
+                                        val body = ("META " + meta.name) +:
+                                            (targetPairs./((uid, fname) => "TARGET " + uid + " " + fname) ++
+                                             textLog./((i, t) => "LOG " + i + "\t" + t.replace("\n", " ").replace("\r", " ")))
+
+                                        post(HRF.server.get + "/notify-turn/" + user + "/" + HRF.secret.get + "/" + server.get + "/" + HRF.lobby.get + "/" + index, body.join("\n")) { r =>
+                                            scala.scalajs.js.Dynamic.global.console.log("NOTIFYDEBUG post response: " + r)
+                                        }
+                                    }
+                                }
+                                catch {
+                                    case e : Throwable =>
+                                        scala.scalajs.js.Dynamic.global.console.log("NOTIFYDEBUG exception: " + e.getMessage)
+                                }
                             }
 
                     startGame(seating, difficulties, state.selected, self, journal, title.|("%untitled%"), () => names, ServerSwitches, notifyWaiting)
@@ -1295,7 +1312,7 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
         ui.action.scroll.scrollTop = 0
     }
 
-    def startGame(seatingX : $[meta.F], difficulties : Map[meta.F, Difficulty], options : $[meta.O], self : $[meta.F], journal : Journal[meta.gaming.ExternalAction], title : String, names : () => Map[meta.F, String], swt : Switches, notifyWaiting : ($[meta.gaming.F], Int) => Unit = (_, _) => ()) {
+    def startGame(seatingX : $[meta.F], difficulties : Map[meta.F, Difficulty], options : $[meta.O], self : $[meta.F], journal : Journal[meta.gaming.ExternalAction], title : String, names : () => Map[meta.F, String], swt : Switches, notifyWaiting : ($[meta.gaming.F], Int, $[(Int, String)]) => Unit = (_, _, _) => ()) {
         history.nuke()
 
         val seating = seatingX.%(f => difficulties(f) != Off)
