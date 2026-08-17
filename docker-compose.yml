@@ -1,0 +1,16 @@
+services:
+  hrf-arcs:
+    build: .
+    container_name: hrf-arcs
+    ports:
+      - "7070:7070"
+    environment:
+      - ARCS_URL=https://arcs.lumpy-arcs.com
+      - ARCS_CDN=https://arcs.lumpy-arcs.com/hrf/
+      - ARCS_PORT=7070
+    volumes:
+      - hrf-db:/data
+    restart: unless-stopped
+
+volumes:
+  hrf-db:

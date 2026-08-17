@@ -1,0 +1,5 @@
+.git
+**/target
+**/project/target
+**/project/project
+good-game-database.*
