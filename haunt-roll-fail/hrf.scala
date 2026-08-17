@@ -245,7 +245,6 @@ case class HotseatGame(time : Double, version : String, meta : String, title : S
 object HRFR {
     val original = Resources(ImageResources(Map(), Map(
         "question-mark" -> "/hrf/question-mark.png",
-        "external-link" -> "/hrf/external-link.png",
     ), HRF.imageCache), () => Map())
 
     val loader = HRF.embedded.?(new WrappedEmbeddedImageLoader(s => "asset-" + s)).|(HRF.imageCache)
@@ -822,7 +821,7 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                     new HRFMetaUI(ui, m, 800).withMeta()
                 }.|(throw new Error("meta not found " + l))
             })) ++
-            meta.extLinks./((t, l) => ZOption(Div(meta.extLinksName), Link(l, t.div(xstyles.divint) ~ Image("external-link")(xstyles.explain)(xstyles.clickThrough), ZBasic.infoch ++ $(xstyles.link)))) ++
+            meta.extLinks./((t, l) => ZOption(Div(meta.extLinksName), Link(l, t.div(xstyles.divint), ZBasic.infoch ++ $(xstyles.link)))) ++
             // $(ZOption(Div(Empty, xlo.grow6), Empty)) ++
             $(ZBasic(" ", Div("Settings"), () => miscellaneous())) ++
             $(ZBasic(" ", Div("About"), () => aboutMenu()))
@@ -1475,8 +1474,8 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
         def linkMenu() {
             ui.action.asker.zask(
                 $(ZBasic((meta.label.hl ~ " Online Game").spn(xstyles.larger110), Div(timestamp.spn(xstyles.smaller75) ~ Break ~ og.title.hl ~ og.options./~(meta.parseOption)./(o => Break ~ o.group ~ " " ~ o.valueOn).merge, $(xlo.fullwidth, xlo.fullheight)))) ++
-                og.spectate.some./(s => ZOption("Spectator Link", (Link(url(s), "Spectate".txt, $(xstyles.link, xlo.fullwidth, xlo.fullheight)) ~ Image("external-link")(xstyles.explain)(xstyles.clickThrough)).div(ZBasic.choice))) ++
-                og.links./(l => ZOption("Player Links", (Link(url(l.key), l.note.some./(_.hl).|("Play".txt) ~ " as ".spn(xstyles.normal) ~ meta.parseFaction(l.faction)./(meta.factionElem).|(l.faction.txt), $(xstyles.link, xlo.fullwidth, xlo.fullheight)) ~ Image("external-link")(xstyles.explain)(xstyles.clickThrough)).div(ZBasic.choice))) ++
+                og.spectate.some./(s => ZOption("Spectator Link", Link(url(s), "Spectate".txt, $(xstyles.link, xlo.fullwidth, xlo.fullheight)).div(ZBasic.choice))) ++
+                og.links./(l => ZOption("Player Links", Link(url(l.key), l.note.some./(_.hl).|("Play".txt) ~ " as ".spn(xstyles.normal) ~ meta.parseFaction(l.faction)./(meta.factionElem).|(l.faction.txt), $(xstyles.link, xlo.fullwidth, xlo.fullheight)).div(ZBasic.choice))) ++
                 $(ZBasic("", ca, () => {
                     ca = clipboard(
                         ($(meta.label) ++
