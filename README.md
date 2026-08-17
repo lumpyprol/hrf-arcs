@@ -24,3 +24,8 @@ docker compose up --build
 ```
 
 The server listens on port 7070. `ARCS_URL`, `ARCS_CDN`, and `ARCS_PORT` are configured in `docker-compose.yml`.
+
+To rebuild after code changes and restart the running container (database volume is preserved):
+```
+docker compose up --build -d
+```
