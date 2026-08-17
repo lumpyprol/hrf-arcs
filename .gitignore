@@ -1,0 +1,6 @@
+target/
+project/target/
+project/project/
+.jvmopts
+good-game-database.*
+good-game-database.tmp/
