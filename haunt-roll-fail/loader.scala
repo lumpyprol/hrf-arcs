@@ -210,13 +210,18 @@ class CachedBlobImageLoader(id : String) extends Loader[ImageWrapper] {
                     try {
                         if (tries == 0) {
                             // println("add " + url)
-                            cache.add(url).then { x =>
+                            val onCacheAdded : js.Function1[js.Any, js.Any] = { x =>
                                 // println("then " + x)
                                 setTimeout(tries * 400) {
                                     process(url, tries + 1)
                                 }
-                                null
+                                js.undefined
                             }
+                            val onCacheAddFailed : js.Function1[js.Any, js.Any] = { e =>
+                                fail(url)
+                                js.undefined
+                            }
+                            cache.add(url).asInstanceOf[js.Dynamic].`then`(onCacheAdded, onCacheAddFailed)
                         }
                         else {
                             // println("wait")
@@ -266,13 +271,18 @@ class CachedImageLoader(id : String) extends Loader[html.Image] {
                     try {
                         if (tries == 0) {
                             // println("add " + url)
-                            cache.add(url).then { x =>
+                            val onCacheAdded : js.Function1[js.Any, js.Any] = { x =>
                                 // println("then " + x)
                                 setTimeout(tries * 400) {
                                     process(url, tries + 1)
                                 }
-                                null
+                                js.undefined
                             }
+                            val onCacheAddFailed : js.Function1[js.Any, js.Any] = { e =>
+                                fail(url)
+                                js.undefined
+                            }
+                            cache.add(url).asInstanceOf[js.Dynamic].`then`(onCacheAdded, onCacheAddFailed)
                         }
                         else {
                             // println("wait")
@@ -324,13 +334,18 @@ class CachedStringLoader(id : String) extends Loader[String] {
                     try {
                         if (tries == 0) {
                             // println("add " + url)
-                            cache.add(url).then { x =>
+                            val onCacheAdded : js.Function1[js.Any, js.Any] = { x =>
                                 // println("then " + x)
                                 setTimeout(tries * 400) {
                                     process(url, tries + 1)
                                 }
-                                null
+                                js.undefined
                             }
+                            val onCacheAddFailed : js.Function1[js.Any, js.Any] = { e =>
+                                fail(url)
+                                js.undefined
+                            }
+                            cache.add(url).asInstanceOf[js.Dynamic].`then`(onCacheAdded, onCacheAddFailed)
                         }
                         else {
                             // println("wait")
