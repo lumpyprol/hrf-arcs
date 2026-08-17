@@ -40,7 +40,7 @@ sealed trait AskOption {
 }
 
 case class BasicOption(group : String, option : String, styles : List[String], onSelect : () => Unit) extends AskOption
-case class InputOption(group : String, option : String, styles : List[String], onSelect : String => Unit, validate : String => Boolean = _ != "") extends AskOption
+case class InputOption(group : String, option : String, styles : List[String], onSelect : String => Unit, validate : String => Boolean = _ != "", onChange : String => Unit = _ => ()) extends AskOption
 
 
 class Logger(logDiv : dom.html.Element, scroll : Boolean) {
@@ -303,6 +303,7 @@ class Asker(val body : AttachmentPoint, assets : String => dom.html.Image) {
 
                     tinp.oninput = (e) => {
                         validate()
+                        w.onChange(tinp.`value`)
                     }
 
                     tinp.onkeydown = (e) => {

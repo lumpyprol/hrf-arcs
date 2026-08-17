@@ -24,7 +24,7 @@ import scalajs.js
 import scalajs.js.timers.setTimeout
 
 object Runner {
-    def run(meta : MetaGame)(seating : $[meta.F], options : $[meta.O], resources : Resources, ui : meta.gaming.GameUI, auto : (meta.G, meta.gaming.F) => meta.gaming.AskResult, journal : Journal[meta.gaming.ExternalAction]) {
+    def run(meta : MetaGame)(seating : $[meta.F], options : $[meta.O], resources : Resources, ui : meta.gaming.GameUI, auto : (meta.G, meta.gaming.F) => meta.gaming.AskResult, journal : Journal[meta.gaming.ExternalAction], notifyWaiting : ($[meta.gaming.F], Int) => Unit = (_, _) => ()) {
         import meta.gaming._
 
         sealed trait UIState
@@ -762,6 +762,9 @@ object Runner {
                         waitingFor = ff
 
                         ui.wait(self, waitingFor, "z... z... z...".txt)
+
+                        if (ff.any)
+                            notifyWaiting(ff, actions.num)
 
                         setTimeout(0) { hrf.web.timed(0)("scrollActionToLatest()") { scrollActionToLatest() } }
                     }

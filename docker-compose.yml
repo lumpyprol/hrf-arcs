@@ -8,6 +8,8 @@ services:
       - ARCS_URL=https://arcs.lumpy-arcs.com
       - ARCS_CDN=https://arcs.lumpy-arcs.com/hrf/
       - ARCS_PORT=7070
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - RESEND_FROM=${RESEND_FROM:-onboarding@resend.dev}
     volumes:
       - hrf-db:/data
     restart: unless-stopped

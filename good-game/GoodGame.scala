@@ -14,13 +14,14 @@ import akka.stream.ActorMaterializer
 import ch.megard.akka.http.cors.scaladsl.CorsDirectives._
 
 object GoodGame {
-    case class User(name : String, secret : String, id : String)
+    case class User(name : String, secret : String, id : String, email : Option[String] = None)
 
     class Users(tag : Tag) extends Table[User](tag, "Users") {
         def name = column[String]("name")
         def secret = column[String]("secret")
         def id = column[String]("id", O.PrimaryKey)
-        def * = (name, secret, id).mapTo[User]
+        def email = column[Option[String]]("email")
+        def * = (name, secret, id, email).mapTo[User]
     }
 
     val users = TableQuery[Users]
@@ -85,6 +86,64 @@ object GoodGame {
     val plays = TableQuery[Plays]
 
 
+    case class NotifiedTurn(journalId : String, userId : String, index : Int)
+
+    class NotifiedTurns(tag : Tag) extends Table[NotifiedTurn](tag, "NotifiedTurns") {
+        def journalId = column[String]("journalId")
+        def userId = column[String]("userId")
+        def index = column[Int]("index")
+        def * = (journalId, userId, index).mapTo[NotifiedTurn]
+        def pk = primaryKey("NotifiedTurns" + "Key", (journalId, userId))
+        def journal = foreignKey("NotifiedTurns" + "Journals", journalId, journals)(_.id)
+        def user = foreignKey("NotifiedTurns" + "Users", userId, users)(_.id)
+    }
+
+    val notifiedTurns = TableQuery[NotifiedTurns]
+
+
+    object EmailSender {
+        def sendTurnEmail(to : String, link : String)(implicit system : ActorSystem) {
+            import system.dispatcher
+
+            val apiKey = sys.env.getOrElse("RESEND_API_KEY", "")
+
+            if (apiKey.isEmpty) {
+                println("RESEND_API_KEY not set, skipping turn email to " + to)
+                return
+            }
+
+            val from = sys.env.getOrElse("RESEND_FROM", "onboarding@resend.dev")
+
+            def jsonEscape(s : String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+
+            val html = "<p>It's your turn! <a href=\"" + link + "\">Click here to play</a>.</p>"
+
+            val json = "{" +
+                "\"from\":\"" + jsonEscape(from) + "\"," +
+                "\"to\":\"" + jsonEscape(to) + "\"," +
+                "\"subject\":\"It's your turn!\"," +
+                "\"html\":\"" + jsonEscape(html) + "\"" +
+            "}"
+
+            val request = HttpRequest(
+                method = HttpMethods.POST,
+                uri = "https://api.resend.com/emails",
+                headers = List(Authorization(OAuth2BearerToken(apiKey))),
+                entity = HttpEntity(ContentTypes.`application/json`, json)
+            )
+
+            Http().singleRequest(request).onComplete {
+                case scala.util.Success(response) =>
+                    if (!response.status.isSuccess())
+                        println("Resend API error sending to " + to + ": " + response.status)
+                    response.discardEntityBytes()
+                case scala.util.Failure(e) =>
+                    println("Failed to send turn email to " + to + ": " + e.getMessage)
+            }
+        }
+    }
+
+
     def main(args : Array[String]) {
         if (args.size != 6) {
             println("gg <create|run> <directory> <database> <url> <cdn> <port>")
@@ -129,7 +188,7 @@ object GoodGame {
         }
 
         if (mode == "create") {
-            execute(users.schema.create, journals.schema.create, entries.schema.create, accessRights.schema.create, plays.schema.create)
+            execute(users.schema.create, journals.schema.create, entries.schema.create, accessRights.schema.create, plays.schema.create, notifiedTurns.schema.create)
             println("Created database.")
             return
         }
@@ -291,6 +350,57 @@ object GoodGame {
                         catch {
                             case e : java.sql.SQLIntegrityConstraintViolationException => complete(StatusCodes.Conflict)
                         }
+                    }
+                }
+            } ~
+            (post & path("register-email" / Segment / Segment)) { case (userId, userSecret) =>
+                decodeRequest {
+                    entity(as[String]) { body =>
+                        val email = body.trim.take(254).ascii
+                        execute(
+                            users.filter(_.id === userId).filter(_.secret === userSecret)
+                                .map(_.email)
+                                .update(if (email.nonEmpty) Some(email) else None)
+                        )
+                        plain("")
+                    }
+                }
+            } ~
+            (post & path("notify-turn" / Segment / Segment / Segment / IntNumber)) { case (userId, userSecret, journalId, index) =>
+                decodeRequest {
+                    entity(as[String]) { body =>
+                        val lines = body.split('\n').toList
+                        val metaName = lines.headOption.getOrElse("").take(32).ascii
+                        val targets = lines.drop(1).map(_.take(32).ascii).filter(_.nonEmpty).distinct
+
+                        // throws (-> 500) if the caller lacks append rights on this journal, same as the append/read endpoints above
+                        execute(hasRight(userId, userSecret, journalId, "append") {
+                            journals.filter(_.id === journalId).result.head
+                        })
+
+                        targets.foreach { targetUserId =>
+                            val alreadyIdx = execute(notifiedTurns.filter(n => n.journalId === journalId && n.userId === targetUserId).map(_.index).result.headOption)
+
+                            if (alreadyIdx.forall(_ < index)) {
+                                execute(
+                                    if (alreadyIdx.isDefined)
+                                        notifiedTurns.filter(n => n.journalId === journalId && n.userId === targetUserId).map(_.index).update(index)
+                                    else
+                                        notifiedTurns += NotifiedTurn(journalId, targetUserId, index)
+                                )
+
+                                val email = execute(users.filter(_.id === targetUserId).map(_.email).result.headOption).flatten
+                                val secret = execute(plays.filter(p => p.journalId === journalId && p.userId === targetUserId).map(_.secret).result.headOption)
+
+                                (email, secret) match {
+                                    case (Some(e), Some(s)) if e.nonEmpty =>
+                                        EmailSender.sendTurnEmail(e, url + "/play/" + metaName + "/" + s)
+                                    case _ =>
+                                }
+                            }
+                        }
+
+                        complete(StatusCodes.Accepted)
                     }
                 }
             }

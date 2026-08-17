@@ -589,6 +589,9 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                 }
                 else
                 if (self.any && enteredNames.contains(user).not) {
+                    var currentName = getCookie("name").|("")
+                    var currentEmail = getCookie("email").|("")
+
                     def randomName() {
                         val adjective = $(
                             "Ardent", "Adventurous", "Agile", "Alert", // "Ambitious",
@@ -645,10 +648,19 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                         askName(adjective.shuffle.head + " " + animal.shuffle.head)
                     }
 
+                    def postEmail() {
+                        val email = currentEmail.trim.take(254)
+                        if (email != "") {
+                            setCookie("email", email, Some(3650))
+                            post(HRF.server.get + "/register-email/" + user + "/" + HRF.secret.get, email) { _ => () }
+                        }
+                    }
+
                     def postName(value : String, retries : Int) {
                         val name = value.split(' ').filter(_ != "").join(" ").sanitize(32)
                         if (name == value && retries < 3) {
                             setCookie("name", name, Some(3650))
+                            postEmail()
                             lj.append($("name", user, name).join(" "))(reread())(postName(name, retries + 1))
                         }
                         else
@@ -656,7 +668,12 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                     }
 
                     def askName(name : String) {
-                        ui.action.asker.iask(InputOption(|("Name").|("What's your name, punk?"), name, Nil, v => postName(v, 0)) :: BasicOption(" ", "Generate Random", Nil, () => randomName()))
+                        currentName = name
+                        ui.action.asker.iask(
+                            InputOption(|("Name").|("What's your name, punk?"), name, Nil, v => postName(v, 0), onChange = v => currentName = v) ::
+                            InputOption("Email (optional — get emailed when it's your turn)", currentEmail, Nil, _ => postName(currentName, 0), validate = _ => true, onChange = v => currentEmail = v) ::
+                            BasicOption(" ", "Generate Random", Nil, () => randomName())
+                        )
                     }
 
                     askName(getCookie("name").|(""))
@@ -698,7 +715,18 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
                         else
                             new ServerJournal[meta.gaming.ExternalAction](meta, HRF.server.get, HRF.user.get, HRF.secret.get, server.get, s => meta.parseActionExternal(s), s => meta.writeActionExternal(s), HRF.paramInt("at") | 999999)
 
-                    startGame(seating, difficulties, state.selected, self, journal, title.|("%untitled%"), () => names, ServerSwitches)
+                    val notifyWaiting : ($[meta.gaming.F], Int) => Unit =
+                        if (HRF.replay || HRF.flag("phantom"))
+                            (_, _) => ()
+                        else
+                            (waiting, index) => {
+                                val targets = waiting./(_.asInstanceOf[meta.F])./~(f => users.get(f)).but(user).distinct
+
+                                if (targets.any)
+                                    post(HRF.server.get + "/notify-turn/" + user + "/" + HRF.secret.get + "/" + server.get + "/" + index, (meta.name +: targets).join("\n")) { _ => () }
+                            }
+
+                    startGame(seating, difficulties, state.selected, self, journal, title.|("%untitled%"), () => names, ServerSwitches, notifyWaiting)
 
                     reread()
 
@@ -1267,7 +1295,7 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
         ui.action.scroll.scrollTop = 0
     }
 
-    def startGame(seatingX : $[meta.F], difficulties : Map[meta.F, Difficulty], options : $[meta.O], self : $[meta.F], journal : Journal[meta.gaming.ExternalAction], title : String, names : () => Map[meta.F, String], swt : Switches) {
+    def startGame(seatingX : $[meta.F], difficulties : Map[meta.F, Difficulty], options : $[meta.O], self : $[meta.F], journal : Journal[meta.gaming.ExternalAction], title : String, names : () => Map[meta.F, String], swt : Switches, notifyWaiting : ($[meta.gaming.F], Int) => Unit = (_, _) => ()) {
         history.nuke()
 
         val seating = seatingX.%(f => difficulties(f) != Off)
@@ -1380,7 +1408,7 @@ class HRFMetaUI(val ui : HRFUI, val meta : MetaGame, delayMainMenu : Int)(implic
 
             import meta.tagF
 
-            Runner.run(meta)(seating, options, resources, renderer, (g, f) => f.as[meta.F]./(f => ask(g, f)).|!("unsuitable ask"), journal)
+            Runner.run(meta)(seating, options, resources, renderer, (g, f) => f.as[meta.F]./(f => ask(g, f)).|!("unsuitable ask"), journal, notifyWaiting)
         }
 
     }
