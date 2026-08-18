@@ -520,6 +520,75 @@
         <div id="replay" style="display: none" ></div>
         <!-- } | REPLAY | } -->
 
+        <!-- { | EMAIL PROMPT | { -->
+        <!--
+            The client we serve is vendored from hrf.im and has no email
+            field on its own name-entry screen (that was custom code we
+            built into the old client we no longer have source for). This
+            is a fully independent overlay, layered on top, so it keeps
+            working regardless of what the vendored client's UI does.
+        -->
+        <div id="hrf-email-prompt" style="display: none; position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; width: 100dvw; height: 100dvh; z-index: 700; background-color: rgba(0, 0, 0, 0.85); align-items: center; justify-content: center;">
+            <div style="background-color: black; border: 1px solid #707070; border-radius: 0.6vmin; padding: 2em; max-width: 80vmin; text-align: center;">
+                <div style="margin-bottom: 1em;">Want an email when it's your turn?</div>
+                <input id="hrf-email-input" type="email" placeholder="you@example.com" style="width: 100%; box-sizing: border-box; padding: 0.6em; margin-bottom: 1em; background-color: #111111; color: white; border: 1px solid #707070; border-radius: 0.4vmin; font-family: inherit; font-size: inherit; text-align: center;" />
+                <div style="display: flex; gap: 0.6em; justify-content: center;">
+                    <button id="hrf-email-submit" style="flex: 1; padding: 0.6em; background-color: #111111; color: white; border: 1px solid #707070; border-radius: 0.4vmin; font-family: inherit; font-size: inherit; cursor: pointer;">Save</button>
+                    <button id="hrf-email-skip" style="flex: 1; padding: 0.6em; background-color: #111111; color: #707070; border: 1px solid #707070; border-radius: 0.4vmin; font-family: inherit; font-size: inherit; cursor: pointer;">No thanks</button>
+                </div>
+            </div>
+        </div>
+        <script id="email-prompt">
+            (function () {
+                const settings = document.getElementById("settings");
+                const server = settings.dataset["server"];
+                const user = settings.dataset["user"];
+                const secret = settings.dataset["secret"];
+
+                if (!server || !user || !secret) return;
+
+                const cookieName = "email-prompted-" + user;
+                const getCookie = (name) => document.cookie.split("; ").find((row) => row.startsWith(name + "="))?.split("=")[1];
+
+                if (getCookie(cookieName)) return;
+
+                const dismiss = () => {
+                    document.cookie = cookieName + "=1; max-age=" + (3650 * 24 * 60 * 60) + "; path=/";
+                    document.getElementById("hrf-email-prompt").style.display = "none";
+                };
+
+                const registerEmail = (email, attemptsLeft) => {
+                    fetch(server + "/register-email/" + user + "/" + secret, { method: "POST", body: email })
+                        .then((res) => {
+                            if (!res.ok && attemptsLeft > 0)
+                                setTimeout(() => registerEmail(email, attemptsLeft - 1), 2000);
+                        })
+                        .catch(() => {
+                            if (attemptsLeft > 0)
+                                setTimeout(() => registerEmail(email, attemptsLeft - 1), 2000);
+                        });
+                };
+
+                const submit = () => {
+                    const email = document.getElementById("hrf-email-input").value.trim();
+                    if (email)
+                        registerEmail(email, 3);
+                    dismiss();
+                };
+
+                setTimeout(() => {
+                    document.getElementById("hrf-email-prompt").style.display = "flex";
+                }, 4000);
+
+                document.getElementById("hrf-email-skip").onclick = dismiss;
+                document.getElementById("hrf-email-submit").onclick = submit;
+                document.getElementById("hrf-email-input").onkeydown = (e) => {
+                    if (e.key === "Enter") submit();
+                };
+            })();
+        </script>
+        <!-- } | EMAIL PROMPT | } -->
+
         <!-- { | ASSETS | { -->
         <!-- } | ASSETS | } -->
 
