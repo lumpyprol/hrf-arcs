@@ -505,7 +505,18 @@ object GoodGame {
             (post & path("internal" / "notify-wait" / Segment / Segment / Segment)) { case (key, gameJournalId, letter) =>
                 if (internalKey.isEmpty || key != internalKey)
                     complete(StatusCodes.Forbidden, "")
-                else {
+                else decodeRequest {
+                    entity(as[String]) { body =>
+                    val bodyLines = body.split('\n').toList
+                    val maxIndex = bodyLines.find(_.startsWith("INDEX ")).map(_.drop(6).trim.toInt).getOrElse(0)
+                    val logEntries = bodyLines.filter(_.startsWith("LOG ")).flatMap { l =>
+                        val rest = l.drop(4)
+                        val tab = rest.indexOf('\t')
+                        if (tab > 0)
+                            scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(200).asciiplus)
+                        else None
+                    }
+
                     val lobbyIds = execute(plays.map(_.journalId).result).distinct
                     val found = lobbyIds.flatMap { lobbyId =>
                         val entryLines = execute(entries.filter(_.journalId === lobbyId).sortBy(_.index).map(_.text).result).toList
@@ -515,7 +526,6 @@ object GoodGame {
 
                     found.foreach { case (lobbyId, info) =>
                         info.letterToUserId.get(letter).foreach { targetUserId =>
-                            val maxIndex = execute(entries.filter(_.journalId === gameJournalId).map(_.index).max.result).getOrElse(0)
                             val alreadyIdx = execute(notifiedTurns.filter(n => n.journalId === gameJournalId && n.userId === targetUserId).map(_.index).result.headOption)
 
                             if (alreadyIdx.forall(_ < maxIndex)) {
@@ -532,7 +542,7 @@ object GoodGame {
                                 (targetUser, secret) match {
                                     case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
                                         val since = alreadyIdx.getOrElse(0)
-                                        val recentLog = execute(entries.filter(e => e.journalId === gameJournalId && e.index > since).sortBy(_.index).map(_.text).result).toList.takeRight(30)
+                                        val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
                                         EmailSender.sendTurnEmail(u.email.get, u.name, factionName(letter), info.title, url + "/play/" + info.meta + "/" + s, recentLog)
                                     case _ =>
                                 }
@@ -541,6 +551,7 @@ object GoodGame {
                     }
 
                     complete(StatusCodes.Accepted)
+                    }
                 }
             }
         }

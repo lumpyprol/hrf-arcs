@@ -52,7 +52,7 @@ function withTimeout(promise, ms, label) {
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function detectWaitingFaction(page, game) {
+async function inspectGame(page, game) {
     const url = `${BASE}/play/${game.meta}/${game.spectateSecret}`;
     log('goto', url);
     await withTimeout(page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }), 20000, 'goto');
@@ -60,25 +60,54 @@ async function detectWaitingFaction(page, game) {
     await withTimeout(page.waitForTimeout(4000), 10000, 'waitForTimeout');
     log('evaluating');
 
-    const faction = await withTimeout(page.evaluate(() => {
+    const result = await withTimeout(page.evaluate(() => {
+        let faction = null;
         const banners = Array.from(document.querySelectorAll('.xlo-fullwidth'));
         for (const banner of banners) {
             const colorSpan = banner.querySelector('[class^="arcs-"], [class*=" arcs-"]');
             if (colorSpan && /^arcs-(red|white|blue|yellow)$/.test(colorSpan.className.trim())) {
                 const text = colorSpan.textContent.trim();
-                if (text) return text;
+                if (text) { faction = text; break; }
             }
         }
-        return null;
-    }), 15000, 'evaluate');
-    log('evaluate done, faction =', faction);
 
-    return faction ? faction[0].toUpperCase() : null;
+        // The client already renders each journal entry into readable prose
+        // in the visible log pane (e.g. "Yellow randomly took initiative"),
+        // grouped under a title="Action #N" span. That's much better output
+        // than we could get re-formatting the raw serialized actions
+        // ourselves, so just read what's already there.
+        const container = document.querySelector('.hrf-inner---hrf-log');
+        const logEntries = container
+            ? Array.from(container.querySelectorAll('span[title^="Action #"]')).map(span => {
+                const m = span.getAttribute('title').match(/Action #(\d+)/);
+                return {
+                    num: m ? parseInt(m[1], 10) : -1,
+                    text: span.textContent.replace(/\s+/g, ' ').trim(),
+                };
+            }).filter(e => e.num >= 0 && e.text && !/^\.+$/.test(e.text))
+            : [];
+
+        return { faction, logEntries };
+    }), 15000, 'evaluate');
+    log('evaluate done, faction =', result.faction, 'log entries =', result.logEntries.length);
+
+    return {
+        letter: result.faction ? result.faction[0].toUpperCase() : null,
+        maxIndex: result.logEntries.reduce((m, e) => Math.max(m, e.num), 0),
+        logEntries: result.logEntries,
+    };
 }
 
-async function notifyWait(gameJournalId, letter) {
-    log('notifying', gameJournalId, letter);
-    await fetchText(`${BASE}/internal/notify-wait/${KEY}/${gameJournalId}/${letter}`, { method: 'POST' });
+async function notifyWait(gameJournalId, letter, maxIndex, logEntries) {
+    log('notifying', gameJournalId, letter, 'up to', maxIndex);
+    const body = [`INDEX ${maxIndex}`]
+        .concat(logEntries.map(e => `LOG ${e.num}\t${e.text}`))
+        .join('\n');
+    await fetchText(`${BASE}/internal/notify-wait/${KEY}/${gameJournalId}/${letter}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body,
+    });
 }
 
 async function pollOnce(browser) {
@@ -96,10 +125,10 @@ async function pollOnce(browser) {
         log('opening page for', game.gameJournalId);
         const page = await browser.newPage();
         try {
-            const letter = await detectWaitingFaction(page, game);
+            const { letter, maxIndex, logEntries } = await inspectGame(page, game);
             if (letter && lastSeen.get(game.gameJournalId) !== letter) {
                 lastSeen.set(game.gameJournalId, letter);
-                await notifyWait(game.gameJournalId, letter);
+                await notifyWait(game.gameJournalId, letter, maxIndex, logEntries);
             }
         } catch (e) {
             log('error polling game', game.gameJournalId, e.message);
