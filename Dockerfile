@@ -9,9 +9,13 @@ COPY scala-js-dom-reduced ./scala-js-dom-reduced
 COPY haunt-roll-fail ./haunt-roll-fail
 COPY good-game ./good-game
 
-RUN cd scala-js-dom-reduced && sbt publishLocal
-RUN cd haunt-roll-fail && sbt fastOptJS
 RUN cd good-game && sbt compile
+
+# The haunt-roll-fail Scala source we have only goes up to 0.8.140; the
+# client bundle actually served is vendored from hrf.im's 0.8.157 build
+# (see haunt-roll-fail/vendor/) since we don't have source for it.
+RUN mkdir -p /app/haunt-roll-fail/target/scala-2.13 \
+    && cp /app/haunt-roll-fail/vendor/hrf-fastopt-0.8.157.js /app/haunt-roll-fail/target/scala-2.13/hrf-fastopt.js
 
 ENV ARCS_URL=http://localhost:7070
 ENV ARCS_CDN=http://localhost:7070/hrf/

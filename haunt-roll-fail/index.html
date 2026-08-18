@@ -525,20 +525,27 @@
 
         <!-- { | SCRIPT | { -->
         <script id="load-hrf-version">
-            const code = "........";
+            const code = "0.8.157";
 
-            const js = document.createElement("script");
-            js.crossorigin = "use-credentials";
-            js.id = "script";
-
-            const version = (window.location.search + "&version=").split("version=")[1].split("&")[0];
-
-            const load = (v) => {
-                js.src = "./target/scala-2.13/hrf-fastopt" + ((v == "") ? "" : "-" + v) + ".js?" + code;
+            const tryLoad = (url, onError) => {
+                const js = document.createElement("script");
+                js.crossorigin = "use-credentials";
+                js.id = "script";
+                js.src = url;
+                js.onerror = () => {
+                    document.head.removeChild(js);
+                    onError();
+                };
                 document.head.appendChild(js);
             }
 
-            load(version);
+            const version = (window.location.search + "&version=").split("version=")[1].split("&")[0];
+
+            tryLoad("./target/scala-2.13/hrf-fastopt" + ((version == "") ? "" : "-" + version) + ".js?" + code, () => {
+                tryLoad("./target/scala-2.13/hrf-fastopt.js?" + code, () => {
+                    console.log("couldn't load game script");
+                })
+            });
         </script>
         <!-- } | SCRIPT | } -->
 
