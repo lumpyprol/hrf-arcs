@@ -10,6 +10,7 @@ services:
       - ARCS_PORT=7070
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - RESEND_FROM=${RESEND_FROM:-onboarding@resend.dev}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
     volumes:
       - hrf-db:/data
     restart: unless-stopped

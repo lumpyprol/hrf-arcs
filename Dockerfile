@@ -3,7 +3,16 @@ FROM eclipse-temurin:17-jdk-jammy
 RUN curl -sfL "https://raw.githubusercontent.com/sbt/sbt/develop/sbt" -o /usr/local/bin/sbt \
     && chmod +x /usr/local/bin/sbt
 
+RUN curl -sfL "https://deb.nodesource.com/setup_20.x" | bash - \
+    && apt-get install -y nodejs
+
 WORKDIR /app
+
+# Turn-wait watcher: since we can't hook the client anymore (see below), it
+# observes games the same way a human would, via a headless browser. Installed
+# from just package.json first so editing watch.js doesn't bust this layer.
+COPY good-game/watcher/package.json ./good-game/watcher/package.json
+RUN cd good-game/watcher && npm install && npx playwright install --with-deps chromium
 
 COPY scala-js-dom-reduced ./scala-js-dom-reduced
 COPY haunt-roll-fail ./haunt-roll-fail

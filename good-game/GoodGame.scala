@@ -164,6 +164,28 @@ object GoodGame {
     }
 
 
+    case class LobbyInfo(meta : String, title : String, gameJournalId : String, letterToUserId : Map[String, String])
+
+    def parseLobby(lines : List[String]) : LobbyInfo = {
+        def field(prefix : String) = lines.find(_.startsWith(prefix)).map(_.drop(prefix.length).trim).getOrElse("")
+
+        val letterToUserId = lines.filter(_.startsWith("user ")).flatMap { l =>
+            val rest = l.drop(5)
+            val sp = rest.indexOf(' ')
+            if (sp > 0) Some(rest.take(sp).trim -> rest.drop(sp + 1).trim) else None
+        }.toMap
+
+        LobbyInfo(field("meta "), field("title "), field("server "), letterToUserId)
+    }
+
+    def factionName(letter : String) = letter match {
+        case "Y" => "Yellow"
+        case "W" => "White"
+        case "R" => "Red"
+        case "B" => "Blue"
+        case other => other
+    }
+
     def main(args : Array[String]) {
         if (args.size != 6) {
             println("gg <create|run> <directory> <database> <url> <cdn> <port>")
@@ -230,6 +252,8 @@ object GoodGame {
         }
 
         def index = readFile(directory + "/index.html")
+
+        val internalKey = sys.env.getOrElse("INTERNAL_API_KEY", "")
 
         def html(s : String) = complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, s))
         def plain(s : String) = complete(HttpEntity(ContentTypes.`text/plain(UTF-8)`, s))
@@ -454,6 +478,69 @@ object GoodGame {
 
                         complete(StatusCodes.Accepted)
                     }
+                }
+            } ~
+            (get & path("internal" / "active-games" / Segment)) { key =>
+                if (internalKey.isEmpty || key != internalKey)
+                    complete(StatusCodes.Forbidden, "")
+                else {
+                    val lobbyIds = execute(plays.map(_.journalId).result).distinct
+                    val lines = lobbyIds.flatMap { lobbyId =>
+                        val entryLines = execute(entries.filter(_.journalId === lobbyId).sortBy(_.index).map(_.text).result).toList
+                        val info = parseLobby(entryLines)
+                        // The spectator gets its own Play row on the lobby journal alongside the
+                        // named players (see new-play calls in the online-game creation flow);
+                        // it's whichever Play's userId isn't one of the named players.
+                        val lobbyPlays = execute(plays.filter(_.journalId === lobbyId).result)
+                        val spectateSecret = lobbyPlays.find(p => !info.letterToUserId.values.toSet.contains(p.userId)).map(_.secret).getOrElse("")
+
+                        if (info.gameJournalId.nonEmpty && spectateSecret.nonEmpty && info.meta.nonEmpty)
+                            Some("GAME " + info.gameJournalId + " " + info.meta + " " + spectateSecret)
+                        else
+                            None
+                    }
+                    plain(lines.distinct.mkString("\n"))
+                }
+            } ~
+            (post & path("internal" / "notify-wait" / Segment / Segment / Segment)) { case (key, gameJournalId, letter) =>
+                if (internalKey.isEmpty || key != internalKey)
+                    complete(StatusCodes.Forbidden, "")
+                else {
+                    val lobbyIds = execute(plays.map(_.journalId).result).distinct
+                    val found = lobbyIds.flatMap { lobbyId =>
+                        val entryLines = execute(entries.filter(_.journalId === lobbyId).sortBy(_.index).map(_.text).result).toList
+                        val info = parseLobby(entryLines)
+                        if (info.gameJournalId == gameJournalId) Some((lobbyId, info)) else None
+                    }.headOption
+
+                    found.foreach { case (lobbyId, info) =>
+                        info.letterToUserId.get(letter).foreach { targetUserId =>
+                            val maxIndex = execute(entries.filter(_.journalId === gameJournalId).map(_.index).max.result).getOrElse(0)
+                            val alreadyIdx = execute(notifiedTurns.filter(n => n.journalId === gameJournalId && n.userId === targetUserId).map(_.index).result.headOption)
+
+                            if (alreadyIdx.forall(_ < maxIndex)) {
+                                execute(
+                                    if (alreadyIdx.isDefined)
+                                        notifiedTurns.filter(n => n.journalId === gameJournalId && n.userId === targetUserId).map(_.index).update(maxIndex)
+                                    else
+                                        notifiedTurns += NotifiedTurn(gameJournalId, targetUserId, maxIndex)
+                                )
+
+                                val targetUser = execute(users.filter(_.id === targetUserId).result.headOption)
+                                val secret = execute(plays.filter(p => p.journalId === lobbyId && p.userId === targetUserId).map(_.secret).result.headOption)
+
+                                (targetUser, secret) match {
+                                    case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
+                                        val since = alreadyIdx.getOrElse(0)
+                                        val recentLog = execute(entries.filter(e => e.journalId === gameJournalId && e.index > since).sortBy(_.index).map(_.text).result).toList.takeRight(30)
+                                        EmailSender.sendTurnEmail(u.email.get, u.name, factionName(letter), info.title, url + "/play/" + info.meta + "/" + s, recentLog)
+                                    case _ =>
+                                }
+                            }
+                        }
+                    }
+
+                    complete(StatusCodes.Accepted)
                 }
             }
         }

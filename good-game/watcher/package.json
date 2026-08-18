@@ -1,0 +1,9 @@
+{
+  "name": "hrf-turn-watcher",
+  "version": "1.0.0",
+  "private": true,
+  "main": "watch.js",
+  "dependencies": {
+    "playwright": "^1.47.0"
+  }
+}
