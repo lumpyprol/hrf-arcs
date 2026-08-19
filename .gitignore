@@ -4,4 +4,6 @@ project/project/
 .jvmopts
 good-game-database.*
 good-game-database.tmp/
+good-game-database-test.*
+good-game-database-test.tmp/
 .env
