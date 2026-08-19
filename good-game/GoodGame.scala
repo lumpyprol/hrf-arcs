@@ -502,6 +502,14 @@ object GoodGame {
                     plain(lines.distinct.mkString("\n"))
                 }
             } ~
+            (get & path("internal" / "read-raw" / Segment / Segment)) { case (key, journalId) =>
+                if (internalKey.isEmpty || key != internalKey)
+                    complete(StatusCodes.Forbidden, "")
+                else {
+                    val entryLines = execute(entries.filter(_.journalId === journalId).sortBy(_.index).map(_.text).result).toList
+                    plain(entryLines.mkString("\n"))
+                }
+            } ~
             (post & path("internal" / "notify-wait" / Segment / Segment / Segment)) { case (key, gameJournalId, letter) =>
                 if (internalKey.isEmpty || key != internalKey)
                     complete(StatusCodes.Forbidden, "")

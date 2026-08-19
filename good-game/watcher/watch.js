@@ -84,9 +84,15 @@ async function inspectGame(page, game) {
     // Cold loads (a game nobody's ever visited yet) can take a while longer
     // than a warm one to actually paint, so wait for real content instead
     // of guessing a fixed delay - but don't fail the poll if it never shows
-    // up, just proceed and report whatever's there (possibly nothing).
+    // up, just proceed and report whatever's there (possibly nothing). The
+    // wait-prompt banner in particular can render well after the log pane
+    // does on more complex/further-along games, so wait for that
+    // specifically rather than treating "log has entries" as good enough.
     try {
-        await page.waitForFunction(() => document.querySelectorAll('.hrf-inner---hrf-log span[title^="Action #"]').length > 0, { timeout: 12000 });
+        await page.waitForFunction(
+            () => Array.from(document.querySelectorAll('.xlo-fullwidth')).some(b => b.textContent.trim()),
+            { timeout: 25000 }
+        );
     } catch (e) {
         log('waitForFunction gave up:', e.message.slice(0, 150));
     }
@@ -108,8 +114,10 @@ async function inspectGame(page, game) {
         // first, so nobody who's actually waiting gets skipped.
         const factions = new Set();
         const banners = Array.from(document.querySelectorAll('.xlo-fullwidth'));
+        const bannerDebug = [];
         for (const banner of banners) {
             const colorSpans = Array.from(banner.querySelectorAll('[class^="arcs-"], [class*=" arcs-"]'));
+            bannerDebug.push({ text: banner.textContent.trim(), spans: colorSpans.map(s => s.className) });
             for (const colorSpan of colorSpans) {
                 if (/^arcs-(red|white|blue|yellow)$/.test(colorSpan.className.trim())) {
                     const text = colorSpan.textContent.trim();
@@ -117,6 +125,7 @@ async function inspectGame(page, game) {
                 }
             }
         }
+        window.__bannerDebug = bannerDebug;
 
         // The client already renders each journal entry into readable prose
         // in the visible log pane (e.g. "Yellow randomly took initiative"),
@@ -134,9 +143,11 @@ async function inspectGame(page, game) {
             }).filter(e => e.num >= 0 && e.text && !/^\.+$/.test(e.text))
             : [];
 
-        return { letters: Array.from(factions), logEntries };
+        return { letters: Array.from(factions), logEntries, bannerDebug: window.__bannerDebug };
     }), 15000, 'evaluate');
     log('evaluate done, letters =', result.letters, 'log entries =', result.logEntries.length);
+    if (result.letters.length === 0 && result.bannerDebug.some(b => b.text))
+        log('banner debug', JSON.stringify(result.bannerDebug.filter(b => b.text)));
 
     return {
         letters: result.letters,
