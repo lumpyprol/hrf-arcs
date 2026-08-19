@@ -104,7 +104,7 @@ object GoodGame {
     object EmailSender {
         def htmlEscape(s : String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
-        def sendTurnEmail(to : String, playerName : String, factionName : String, gameTitle : String, link : String, recentLog : List[String])(implicit system : ActorSystem) {
+        def sendTurnEmail(to : String, playerName : String, factionName : String, factionLetter : String, gameTitle : String, link : String, recentLog : List[String])(implicit system : ActorSystem) {
             import system.dispatcher
 
             val apiKey = sys.env.getOrElse("RESEND_API_KEY", "")
@@ -118,11 +118,14 @@ object GoodGame {
 
             def jsonEscape(s : String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
 
-            val greeting = if (playerName.nonEmpty) playerName else "there"
-            val faction = if (factionName.nonEmpty) factionName else "your faction"
+            // Prefer the player's own name over the faction color, but always
+            // tag the faction letter alongside it so it stays unambiguous
+            // ("Ben [W]") even once several players have set names.
+            val name = if (playerName.nonEmpty) playerName else if (factionName.nonEmpty) factionName else "Player"
+            val displayName = name + " [" + factionLetter + "]"
             val title = if (gameTitle.nonEmpty) gameTitle else "Arcs"
 
-            val subject = faction + ": your turn — " + title
+            val subject = displayName + ": your turn — " + title
 
             val logHtml =
                 if (recentLog.nonEmpty)
@@ -133,8 +136,8 @@ object GoodGame {
                     ""
 
             val html =
-                "<p>Hi " + htmlEscape(greeting) + ",</p>" +
-                "<p>It's your turn as <b>" + htmlEscape(faction) + "</b> in <b>" + htmlEscape(title) + "</b>.</p>" +
+                "<p>Hi " + htmlEscape(displayName) + ",</p>" +
+                "<p>It's your turn as <b>" + htmlEscape(factionName) + "</b> in <b>" + htmlEscape(title) + "</b>.</p>" +
                 logHtml +
                 "<p><a href=\"" + link + "\">Take your turn &rarr;</a></p>"
 
@@ -470,7 +473,7 @@ object GoodGame {
                                     case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
                                         val since = alreadyIdx.getOrElse(0)
                                         val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
-                                        EmailSender.sendTurnEmail(u.email.get, u.name, factionName, journal.name, url + "/play/" + metaName + "/" + s, recentLog)
+                                        EmailSender.sendTurnEmail(u.email.get, u.name, factionName, factionName.take(1), journal.name, url + "/play/" + metaName + "/" + s, recentLog)
                                     case _ =>
                                 }
                             }
@@ -551,7 +554,7 @@ object GoodGame {
                                     case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
                                         val since = alreadyIdx.getOrElse(0)
                                         val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
-                                        EmailSender.sendTurnEmail(u.email.get, u.name, factionName(letter), info.title, url + "/play/" + info.meta + "/" + s, recentLog)
+                                        EmailSender.sendTurnEmail(u.email.get, u.name, factionName(letter), letter, info.title, url + "/play/" + info.meta + "/" + s, recentLog)
                                     case _ =>
                                 }
                             }
