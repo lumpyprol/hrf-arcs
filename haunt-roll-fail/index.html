@@ -356,6 +356,18 @@
                     url("background.png");
             }
 
+            /* Blue and red faction text are low-contrast on the black
+               background; fake a light outline with layered text-shadow
+               since the client's own stylesheet is a runtime-generated
+               CSSOM we can't edit directly. */
+            .arcs-blue, .arcs-red {
+                text-shadow:
+                    -1px -1px 0 rgba(255, 255, 255, 0.7),
+                     1px -1px 0 rgba(255, 255, 255, 0.7),
+                    -1px  1px 0 rgba(255, 255, 255, 0.7),
+                     1px  1px 0 rgba(255, 255, 255, 0.7);
+            }
+
             /* )} /* */
         </style>
 
