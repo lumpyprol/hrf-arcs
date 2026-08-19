@@ -356,21 +356,6 @@
                     url("background.png");
             }
 
-            /* Blue and red faction text are low-contrast on the black
-               background; add a soft white glow for legibility. A hard
-               1px 4-corner "outline" was tried first but at this small,
-               condensed font size it turned the letterforms into a blurry
-               blob instead of reading as a stroke - a blurred glow (no
-               offset) reads much more cleanly at this size. Matches on
-               the substring since the client emits compound class names
-               like "arcs-blue---arcs-title" for some contexts, not just
-               a bare "arcs-blue" token. */
-            [class*="arcs-blue"], [class*="arcs-red"] {
-                text-shadow:
-                    0 0 2px rgba(255, 255, 255, 0.9),
-                    0 0 2px rgba(255, 255, 255, 0.9);
-            }
-
             /* )} /* */
         </style>
 
