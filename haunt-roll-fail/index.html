@@ -356,6 +356,24 @@
                     url("background.png");
             }
 
+            /* Blue and red faction text (colors set by the client's own
+               runtime-generated stylesheet) are low-contrast on the black
+               background. text-shadow outlines (hard and soft glow) were
+               both tried and rejected as looking bad at this font size -
+               brightening the colors themselves reads much more cleanly.
+               !important + equal specificity is needed to win over the
+               client's own rule, which loads after this stylesheet.
+               Matches on the substring since the client emits compound
+               class names like "arcs-blue---arcs-title" in some contexts,
+               not just a bare "arcs-blue" token. */
+            [class*="arcs-blue"] {
+                color: #3d8bff !important;
+            }
+
+            [class*="arcs-red"] {
+                color: #ff4757 !important;
+            }
+
             /* )} /* */
         </style>
 
