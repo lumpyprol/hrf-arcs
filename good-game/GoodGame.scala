@@ -167,18 +167,26 @@ object GoodGame {
     }
 
 
-    case class LobbyInfo(meta : String, title : String, gameJournalId : String, letterToUserId : Map[String, String])
+    case class LobbyInfo(meta : String, title : String, gameJournalId : String, letterToUserId : Map[String, String], letterToName : Map[String, String])
 
     def parseLobby(lines : List[String]) : LobbyInfo = {
         def field(prefix : String) = lines.find(_.startsWith(prefix)).map(_.drop(prefix.length).trim).getOrElse("")
 
-        val letterToUserId = lines.filter(_.startsWith("user ")).flatMap { l =>
-            val rest = l.drop(5)
+        def pairs(prefix : String) = lines.filter(_.startsWith(prefix)).flatMap { l =>
+            val rest = l.drop(prefix.length)
             val sp = rest.indexOf(' ')
             if (sp > 0) Some(rest.take(sp).trim -> rest.drop(sp + 1).trim) else None
         }.toMap
 
-        LobbyInfo(field("meta "), field("title "), field("server "), letterToUserId)
+        val letterToUserId = pairs("user ")
+        // The Users.name SQL column is stuck at its faction-color default for
+        // every seat (nothing ever calls /register-name in this client
+        // version) - the human display name a player actually chose lives
+        // only in these "name <userId> <name>" lobby-journal lines instead.
+        val idToName = pairs("name ")
+        val letterToName = letterToUserId.flatMap { case (letter, uid) => idToName.get(uid).map(letter -> _) }
+
+        LobbyInfo(field("meta "), field("title "), field("server "), letterToUserId, letterToName)
     }
 
     def factionName(letter : String) = letter match {
@@ -554,7 +562,8 @@ object GoodGame {
                                     case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
                                         val since = alreadyIdx.getOrElse(0)
                                         val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
-                                        EmailSender.sendTurnEmail(u.email.get, u.name, factionName(letter), letter, info.title, url + "/play/" + info.meta + "/" + s, recentLog)
+                                        val playerName = info.letterToName.getOrElse(letter, u.name)
+                                        EmailSender.sendTurnEmail(u.email.get, playerName, factionName(letter), letter, info.title, url + "/play/" + info.meta + "/" + s, recentLog)
                                     case _ =>
                                 }
                             }
