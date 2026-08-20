@@ -132,15 +132,49 @@ async function inspectGame(page, game) {
         // grouped under a title="Action #N" span. That's much better output
         // than we could get re-formatting the raw serialized actions
         // ourselves, so just read what's already there.
+        //
+        // For the email we also want it to actually look like the in-game
+        // log (colored faction/keyword names), not flattened plain text -
+        // so walk each entry's DOM and turn per-run color/bold differences
+        // into inline-styled spans. Diffing against the parent's own
+        // resolved style (rather than a hardcoded base color) means this
+        // automatically tracks whatever colors index.html happens to be
+        // using, brightened overrides included, with no email-side keyword
+        // list to keep in sync.
+        function escapeHtml(s) {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        function nodeToEmailHtml(node, parentColor, parentBold) {
+            if (node.nodeType === Node.TEXT_NODE)
+                return escapeHtml(node.textContent.replace(/\s+/g, ' '));
+            if (node.nodeType !== Node.ELEMENT_NODE)
+                return '';
+            const cs = getComputedStyle(node);
+            const bold = parseInt(cs.fontWeight, 10) >= 600;
+            const inner = Array.from(node.childNodes).map(c => nodeToEmailHtml(c, cs.color, bold)).join('');
+            if (!inner.trim())
+                return inner;
+            const styles = [];
+            if (cs.color !== parentColor) styles.push('color:' + cs.color);
+            if (bold && !parentBold) styles.push('font-weight:bold');
+            return styles.length ? '<span style="' + styles.join(';') + '">' + inner + '</span>' : inner;
+        }
+
         const container = document.querySelector('.hrf-inner---hrf-log');
+        const baseColor = container ? getComputedStyle(container).color : 'rgb(112, 112, 112)';
         const logEntries = container
             ? Array.from(container.querySelectorAll('span[title^="Action #"]')).map(span => {
                 const m = span.getAttribute('title').match(/Action #(\d+)/);
                 return {
                     num: m ? parseInt(m[1], 10) : -1,
                     text: span.textContent.replace(/\s+/g, ' ').trim(),
+                    html: nodeToEmailHtml(span, baseColor, false).trim(),
                 };
-            }).filter(e => e.num >= 0 && e.text && !/^\.+$/.test(e.text))
+            // Decorative separator entries between rounds render as a run of
+            // repeated punctuation (dots, dashes, ...) with no real content -
+            // skip anything with no letters or digits in it at all, rather
+            // than special-casing "dots only" as before.
+            }).filter(e => e.num >= 0 && e.text && /[a-zA-Z0-9]/.test(e.text))
             : [];
 
         return { letters: Array.from(factions), logEntries, bannerDebug: window.__bannerDebug };
@@ -163,7 +197,7 @@ async function notifyWait(gameJournalId, letter, maxIndex, logEntries) {
     // this is not the only thing standing between a player and a duplicate
     // email.
     const body = [`INDEX ${maxIndex}`]
-        .concat(logEntries.map(e => `LOG ${e.num}\t${e.text}`))
+        .concat(logEntries.map(e => `LOG ${e.num}\t${e.html}`))
         .join('\n');
     await fetchText(`${BASE}/internal/notify-wait/${KEY}/${gameJournalId}/${letter}`, {
         method: 'POST',

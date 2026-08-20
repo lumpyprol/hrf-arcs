@@ -127,11 +127,19 @@ object GoodGame {
 
             val subject = displayName + ": your turn — " + title
 
+            // Each entry already arrives as inline-styled HTML matching the
+            // in-game log's own colors (see watch.js's nodeToEmailHtml) -
+            // render it directly rather than htmlEscape-ing it into plain
+            // text. Trusted input: this only ever comes from our own
+            // watcher via the key-gated /internal/notify-wait route, never
+            // from a client request.
             val logHtml =
                 if (recentLog.nonEmpty)
-                    "<p><b>Since your last turn:</b></p><ul style=\"padding-left:20px;margin:8px 0;\">" +
-                    recentLog.map(l => "<li style=\"margin:2px 0;\">" + htmlEscape(l) + "</li>").mkString("") +
-                    "</ul>"
+                    "<p style=\"margin:16px 0 6px;\"><b>Since your last turn:</b></p>" +
+                    "<div style=\"background:#000;color:#707070;padding:10px 14px;border-radius:6px;" +
+                    "font-family:Consolas,Menlo,Monaco,monospace;font-size:14px;line-height:1.6;\">" +
+                    recentLog.map(l => "<div>" + l + "</div>").mkString("") +
+                    "</div>"
                 else
                     ""
 
@@ -531,8 +539,13 @@ object GoodGame {
                     val logEntries = bodyLines.filter(_.startsWith("LOG ")).flatMap { l =>
                         val rest = l.drop(4)
                         val tab = rest.indexOf('\t')
+                        // Each entry is now inline-styled HTML (see watch.js's
+                        // nodeToEmailHtml), which runs noticeably longer per
+                        // line than the old plain text - room for a couple of
+                        // "<span style=\"color:rgb(...)\">...</span>" wrappers
+                        // without truncating mid-tag.
                         if (tab > 0)
-                            scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(200).asciiplus)
+                            scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(600).asciiplus)
                         else None
                     }
 
