@@ -541,11 +541,14 @@ object GoodGame {
                         val tab = rest.indexOf('\t')
                         // Each entry is now inline-styled HTML (see watch.js's
                         // nodeToEmailHtml), which runs noticeably longer per
-                        // line than the old plain text - room for a couple of
-                        // "<span style=\"color:rgb(...)\">...</span>" wrappers
-                        // without truncating mid-tag.
+                        // line than the old plain text - resource/dice icons
+                        // in particular are inlined as data: URI <img> tags,
+                        // a few KB apiece and sometimes several per line (a
+                        // dice roll), so this needs much more room than the
+                        // handful of "<span style=\"color:rgb(...)\">" wrappers
+                        // colored text alone would need.
                         if (tab > 0)
-                            scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(600).asciiplus)
+                            scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(50000).asciiplus)
                         else None
                     }
 

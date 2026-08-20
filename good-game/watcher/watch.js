@@ -144,11 +144,37 @@ async function inspectGame(page, game) {
         function escapeHtml(s) {
             return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
+        // Resource/dice icons are <img> tags pointing at blob: URLs, which
+        // only resolve inside this page - they're meaningless outside it, so
+        // an email needs the actual pixels inlined as a data: URI instead.
+        // The source assets are much higher-res (128x128) than they're ever
+        // displayed at (~20x20), so encode at 2x the on-screen size rather
+        // than natural size - that alone is the difference between a ~7KB
+        // and a ~300KB image per icon.
+        function imgToDataUrl(img, w, h) {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                return canvas.toDataURL('image/png');
+            } catch (e) {
+                return null;
+            }
+        }
         function nodeToEmailHtml(node, parentColor, parentBold) {
             if (node.nodeType === Node.TEXT_NODE)
                 return escapeHtml(node.textContent.replace(/\s+/g, ' '));
             if (node.nodeType !== Node.ELEMENT_NODE)
                 return '';
+            if (node.tagName === 'IMG') {
+                const r = node.getBoundingClientRect();
+                const w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
+                const dataUrl = imgToDataUrl(node, w * 2, h * 2);
+                return dataUrl
+                    ? '<img src="' + dataUrl + '" width="' + w + '" height="' + h + '" style="vertical-align:middle;display:inline-block;">'
+                    : '';
+            }
             const cs = getComputedStyle(node);
             const bold = parseInt(cs.fontWeight, 10) >= 600;
             const inner = Array.from(node.childNodes).map(c => nodeToEmailHtml(c, cs.color, bold)).join('');
