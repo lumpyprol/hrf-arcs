@@ -429,6 +429,18 @@ object GoodGame {
                     }
                 }
             } ~
+            // The "want an email?" prompt in index.html tracks "already asked"
+            // with a cookie, which only lives on the device it was set on -
+            // opening the same player link on a second device (e.g. via the
+            // turn email's own link) would otherwise re-prompt someone who
+            // already registered from their first device. Let the client
+            // check the actual server state before ever showing the prompt.
+            (get & path("has-email" / Segment / Segment)) { case (userId, userSecret) =>
+                val hasEmail = execute(
+                    users.filter(_.id === userId).filter(_.secret === userSecret).map(_.email).result.headOption
+                ).flatten.exists(_.nonEmpty)
+                plain(if (hasEmail) "1" else "0")
+            } ~
             (post & path("register-name" / Segment / Segment)) { case (userId, userSecret) =>
                 decodeRequest {
                     entity(as[String]) { body =>

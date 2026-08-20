@@ -598,9 +598,29 @@
                     dismiss();
                 };
 
-                setTimeout(() => {
-                    document.getElementById("hrf-email-prompt").style.display = "flex";
-                }, 4000);
+                // The dismiss cookie only lives on the device it was set on,
+                // so opening the same player link on a second device (e.g.
+                // following the turn email's own link to a work laptop)
+                // would otherwise re-prompt someone who already registered
+                // from their first device. Check the server before ever
+                // showing the prompt, and mirror a "yes" into this device's
+                // cookie too so it doesn't need to ask again either.
+                fetch(server + "/has-email/" + user + "/" + secret)
+                    .then((res) => res.ok ? res.text() : "0")
+                    .then((hasEmail) => {
+                        if (hasEmail.trim() === "1") {
+                            dismiss();
+                            return;
+                        }
+                        setTimeout(() => {
+                            document.getElementById("hrf-email-prompt").style.display = "flex";
+                        }, 4000);
+                    })
+                    .catch(() => {
+                        setTimeout(() => {
+                            document.getElementById("hrf-email-prompt").style.display = "flex";
+                        }, 4000);
+                    });
 
                 document.getElementById("hrf-email-skip").onclick = dismiss;
                 document.getElementById("hrf-email-submit").onclick = submit;
