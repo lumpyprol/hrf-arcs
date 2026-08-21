@@ -9,6 +9,10 @@
 
 ## The client bundle is vendored — do not try to recompile it
 
+**This is permanent, not a temporary gap.** The 0.8.157 source is confirmed unrecoverable — there is no path to ever getting it, so nothing here is a "for now." Any request to change the actual game (logic, layout, interaction, in-game copy, accessibility inside the component tree, anything beyond page-level CSS) needs to be declined or redirected, not investigated fresh each time.
+
+This split is specific to Arcs. The other nine games under `haunt-roll-fail/` (`root/`, `vast/`, `coup/`, `doms/`, `dwam/`, `sehi/`, `suok/`, `yarg/`, `cthw/`, `inis/` — none of them currently wired up server-side) have no equivalent `vendor/` directory and would build from real, current source if any were ever brought online. Don't generalize this constraint to them.
+
 Production serves `haunt-roll-fail/vendor/hrf-fastopt-0.8.157.js`, copied in verbatim. It is **not** built from `haunt-roll-fail/*.scala` — that local source tree only goes up to version 0.8.140 and does not match what's live. The Dockerfile spells this out and enforces it:
 
 ```dockerfile
@@ -25,7 +29,14 @@ This runs unconditionally, after `sbt compile`, and clobbers whatever `sbt fastO
 
 - **Never run `sbt fastOptJS`** (or any other attempt to recompile the client) expecting it to change what's served. Even a successful compile is discarded by the Docker build in favor of the vendored 0.8.157 bundle.
 - **Editing `.scala` files under `haunt-roll-fail/`** (styles, layout, CSS-in-Scala, components, etc.) **has zero effect on production.** If you find yourself about to change something in there to fix a visual/CSS issue, stop — that's not the right file.
-- For CSS/visual/UI changes to the client: look at `haunt-roll-fail/index.html` first — it's real and unvendored, served as-is (inline `<style>`/`<script>` blocks live there), or at HTML templates in `good-game/GoodGame.scala`. If the requested change genuinely requires touching the client's own rendering logic (not just page-level HTML/CSS), say so explicitly and check with the user before attempting anything — the source needed to do that safely may not exist in this repo.
+- For CSS/visual/UI changes to the client: look at `haunt-roll-fail/index.html` first — it's real and unvendored, served as-is (inline `<style>`/`<script>` blocks live there), or at HTML templates in `good-game/GoodGame.scala`. If the requested change genuinely requires touching the client's own rendering logic (not just page-level HTML/CSS), say so explicitly and check with the user — the source needed to do that doesn't exist and never will.
+- Every override lives in `index.html`'s global `<style>` block, matched by a substring selector (`[class*="arcs-blue"]`, not `.arcs-blue`) because the compiled bundle emits compound class names in some contexts (`arcs-blue---arcs-title`, joined with `---`) as well as bare ones. There is zero compile-time signal if hrf.im ever ships a different build and these class names shift — if colors/styling suddenly look wrong in production with no corresponding commit, suspect that first and go re-inspect the live DOM rather than assuming a regression in our own code.
+
+**Known class-name vocabulary** (reverse-engineered by inspecting a live game's DOM in browser — there's no source to grep, so this list only grows by doing that again for anything not covered here):
+- Faction colors: `arcs-blue`, `arcs-red`, `arcs-yellow`, `arcs-white` — brightened via `!important` overrides in `index.html` (see below).
+- Other tag/keyword colors seen in the log: `arcs-empire` (magenta), `arcs-psionic` (pink), `arcs-weapon` (orange/rust), `arcs-blights` (green).
+- Structural: `arcs-title` / `arcs-condensed` (wrapper spans, not colors themselves — a colored span is usually nested inside one of these), `arcs-title-w` (player name headers in the player-box UI, plain grey, not faction-colored despite the name).
+- Log entries render real `<img>` icons (resource/dice icons) at `blob:` URLs — meaningless outside the page, not a class-name concern, but relevant if extending `watch.js`'s log scraping again (see `nodeToEmailHtml` in `good-game/watcher/watch.js` for the existing canvas-to-data-URI approach).
 
 ## Deploying
 
