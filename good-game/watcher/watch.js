@@ -27,7 +27,7 @@ if (!KEY) {
     process.exit(0);
 }
 
-const lastSeen = new Map(); // gameJournalId -> letter
+const lastSeen = new Map(); // gameJournalId -> Map(letter -> last-notified prompt text)
 
 function log(...args) {
     console.log('[watcher]', new Date().toISOString(), ...args);
@@ -112,16 +112,31 @@ async function inspectGame(page, game) {
         // sometimes several are at once ("Waiting for Yellow, White") - grab
         // every faction-colored span in the prompt banner(s), not just the
         // first, so nobody who's actually waiting gets skipped.
+        //
+        // Also record which banner's text prompted each letter. A single
+        // multi-step turn (e.g. a negotiation phase: draft a deal, approve
+        // it, then rearrange a resource) can keep the same letter "waiting"
+        // continuously across many polls without ever clearing - if we only
+        // tracked letter presence, the player would get exactly one email
+        // for the whole stretch and nothing for the later steps. Comparing
+        // the actual prompt text lets pollOnce notice "this is a new ask
+        // for the same player" even though they never stopped waiting.
         const factions = new Set();
+        const letterToPrompt = {};
         const banners = Array.from(document.querySelectorAll('.xlo-fullwidth'));
         const bannerDebug = [];
         for (const banner of banners) {
+            const bannerText = banner.textContent.replace(/\s+/g, ' ').trim();
             const colorSpans = Array.from(banner.querySelectorAll('[class^="arcs-"], [class*=" arcs-"]'));
-            bannerDebug.push({ text: banner.textContent.trim(), spans: colorSpans.map(s => s.className) });
+            bannerDebug.push({ text: bannerText, spans: colorSpans.map(s => s.className) });
             for (const colorSpan of colorSpans) {
                 if (/^arcs-(red|white|blue|yellow)$/.test(colorSpan.className.trim())) {
                     const text = colorSpan.textContent.trim();
-                    if (text) factions.add(text[0].toUpperCase());
+                    if (text) {
+                        const letter = text[0].toUpperCase();
+                        factions.add(letter);
+                        letterToPrompt[letter] = bannerText;
+                    }
                 }
             }
         }
@@ -203,7 +218,7 @@ async function inspectGame(page, game) {
             }).filter(e => e.num >= 0 && e.text && /[a-zA-Z0-9]/.test(e.text))
             : [];
 
-        return { letters: Array.from(factions), logEntries, bannerDebug: window.__bannerDebug };
+        return { letters: Array.from(factions), letterToPrompt, logEntries, bannerDebug: window.__bannerDebug };
     }), 15000, 'evaluate');
     log('evaluate done, letters =', result.letters, 'log entries =', result.logEntries.length);
     if (result.letters.length === 0 && result.bannerDebug.some(b => b.text))
@@ -211,6 +226,7 @@ async function inspectGame(page, game) {
 
     return {
         letters: result.letters,
+        letterToPrompt: result.letterToPrompt,
         maxIndex: result.logEntries.reduce((m, e) => Math.max(m, e.num), 0),
         logEntries: result.logEntries,
     };
@@ -247,16 +263,24 @@ async function pollOnce(context) {
         log('opening page for', game.gameJournalId);
         const page = await context.newPage();
         try {
-            const { letters, maxIndex, logEntries } = await inspectGame(page, game);
-            const previous = lastSeen.get(game.gameJournalId) || new Set();
+            const { letters, letterToPrompt, maxIndex, logEntries } = await inspectGame(page, game);
+            const previous = lastSeen.get(game.gameJournalId) || new Map();
+            const current = new Map(previous);
             for (const letter of letters) {
-                if (!previous.has(letter))
+                const prompt = letterToPrompt[letter] || '';
+                // A letter can stay "waiting" continuously across many polls
+                // through a multi-step turn (negotiate, then rearrange a
+                // resource, ...) without ever clearing - re-notify whenever
+                // what they're actually being asked changes, not only the
+                // first time this letter shows up at all.
+                if (previous.get(letter) !== prompt)
                     await notifyWait(game.gameJournalId, letter, maxIndex, logEntries);
+                current.set(letter, prompt);
             }
             // Only update our local view of "who's waiting" on a real read -
             // an empty result usually just means the page hadn't finished
             // rendering yet, not that nobody's waiting anymore.
-            if (letters.length > 0) lastSeen.set(game.gameJournalId, new Set(letters));
+            if (letters.length > 0) lastSeen.set(game.gameJournalId, current);
         } catch (e) {
             log('error polling game', game.gameJournalId, e.message);
         } finally {
