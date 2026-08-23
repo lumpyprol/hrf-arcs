@@ -8,6 +8,7 @@ import akka.http.scaladsl.Http
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers._
 import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.server.ExceptionHandler
 import akka.http.scaladsl.settings.ServerSettings
 import akka.stream.ActorMaterializer
 
@@ -278,7 +279,17 @@ object GoodGame {
         def plain(s : String) = complete(HttpEntity(ContentTypes.`text/plain(UTF-8)`, s))
         def redir(s : String) = redirect(s, StatusCodes.SeeOther)
 
-        val route = cors() {
+        // Every .result.head lookup in this file (user/secret, journal
+        // access rights, journal existence) is an existence-or-auth check -
+        // an empty result means "not found or not allowed", not a server
+        // bug. Without this, that NoSuchElementException falls through to
+        // Akka's default handler as an unhandled-exception 500 (with a full
+        // stack trace logged) instead of a clean rejection.
+        val authExceptionHandler = ExceptionHandler {
+            case _ : NoSuchElementException => complete(StatusCodes.Forbidden, "")
+        }
+
+        val route = handleExceptions(authExceptionHandler) { cors() {
             (pathPrefix("hrf")) {
                 optionalHeaderValueByName("Referer") { referer =>
                     if (referer.exists(_.startsWith(url)))
@@ -602,7 +613,7 @@ object GoodGame {
                     }
                 }
             }
-        }
+        } }
 
         val settings = ServerSettings("").withRemoteAddressAttribute(true)
 
