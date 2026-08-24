@@ -179,7 +179,13 @@ object GoodGame {
     case class LobbyInfo(meta : String, title : String, gameJournalId : String, letterToUserId : Map[String, String], letterToName : Map[String, String])
 
     def parseLobby(lines : List[String]) : LobbyInfo = {
-        def field(prefix : String) = lines.find(_.startsWith(prefix)).map(_.drop(prefix.length).trim).getOrElse("")
+        // A multi-chapter campaign's lobby journal accumulates one "server
+        // <gameJournalId>" (and "title "/"meta ") line per chapter as new
+        // chapters start, all in the same journal - take the most recent
+        // one, not the first, or every chapter after the first is
+        // invisible to this (the watcher keeps polling chapter 1's
+        // long-finished game and nobody past it ever gets notified).
+        def field(prefix : String) = lines.findLast(_.startsWith(prefix)).map(_.drop(prefix.length).trim).getOrElse("")
 
         def pairs(prefix : String) = lines.filter(_.startsWith(prefix)).flatMap { l =>
             val rest = l.drop(prefix.length)
