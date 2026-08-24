@@ -88,6 +88,7 @@ async function inspectGame(page, game) {
     // wait-prompt banner in particular can render well after the log pane
     // does on more complex/further-along games, so wait for that
     // specifically rather than treating "log has entries" as good enough.
+    let rendered = true;
     try {
         await page.waitForFunction(
             () => Array.from(document.querySelectorAll('.xlo-fullwidth')).some(b => b.textContent.trim()),
@@ -95,6 +96,7 @@ async function inspectGame(page, game) {
         );
     } catch (e) {
         log('waitForFunction gave up:', e.message.slice(0, 150));
+        rendered = false;
     }
 
     const diag = await page.evaluate(() => ({
@@ -225,6 +227,7 @@ async function inspectGame(page, game) {
         log('banner debug', JSON.stringify(result.bannerDebug.filter(b => b.text)));
 
     return {
+        rendered,
         letters: result.letters,
         letterToPrompt: result.letterToPrompt,
         maxIndex: result.logEntries.reduce((m, e) => Math.max(m, e.num), 0),
@@ -260,10 +263,34 @@ async function pollOnce(context) {
     log('polling', games.length, 'game(s)');
 
     for (const game of games) {
-        log('opening page for', game.gameJournalId);
-        const page = await context.newPage();
+        // The client intermittently fails to render at all within one page
+        // load (see the 404/Cache.add() pageerror noted above inspectGame -
+        // looks like a race inside the vendored bundle we can't fix
+        // directly), which burns the whole poll with letters always empty.
+        // A same-cycle retry on a fresh page cuts the effective miss window
+        // roughly in half instead of waiting for the next 45s+ cycle.
+        let attempt;
+        for (let n = 0; n < 2; n++) {
+            log('opening page for', game.gameJournalId, n > 0 ? '(retry)' : '');
+            const page = await context.newPage();
+            try {
+                attempt = await inspectGame(page, game);
+            } catch (e) {
+                log('error polling game', game.gameJournalId, e.message);
+                attempt = null;
+            } finally {
+                try {
+                    await withTimeout(page.close(), 5000, 'page.close');
+                } catch (e) {
+                    log('error closing page', e.message);
+                }
+            }
+            if (attempt && attempt.rendered) break;
+        }
+        if (!attempt) continue;
+
         try {
-            const { letters, letterToPrompt, maxIndex, logEntries } = await inspectGame(page, game);
+            const { letters, letterToPrompt, maxIndex, logEntries } = attempt;
             const previous = lastSeen.get(game.gameJournalId) || new Map();
             const current = new Map(previous);
             for (const letter of letters) {
@@ -283,12 +310,6 @@ async function pollOnce(context) {
             if (letters.length > 0) lastSeen.set(game.gameJournalId, current);
         } catch (e) {
             log('error polling game', game.gameJournalId, e.message);
-        } finally {
-            try {
-                await withTimeout(page.close(), 5000, 'page.close');
-            } catch (e) {
-                log('error closing page', e.message);
-            }
         }
     }
 
