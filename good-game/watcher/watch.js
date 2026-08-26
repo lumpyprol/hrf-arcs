@@ -20,7 +20,12 @@ const BASE = `http://localhost:${PORT}`;
 // calls below use localhost directly.
 const PUBLIC_BASE = process.env.ARCS_URL || BASE;
 const KEY = process.env.INTERNAL_API_KEY || '';
-const POLL_INTERVAL_MS = parseInt(process.env.WATCHER_POLL_MS || '45000', 10);
+const POLL_INTERVAL_MS = parseInt(process.env.WATCHER_POLL_MS || '25000', 10);
+// A render that never completes (see the retry loop in pollOnce) burns a
+// whole attempt with nobody detected as waiting - more attempts per cycle
+// shrinks the odds a fast turn starts and ends without any of them
+// succeeding, at the cost of that many more page loads on a bad cycle.
+const MAX_ATTEMPTS = parseInt(process.env.WATCHER_MAX_ATTEMPTS || '3', 10);
 
 if (!KEY) {
     console.log('[watcher] INTERNAL_API_KEY not set, watcher disabled');
@@ -251,6 +256,17 @@ async function notifyWait(gameJournalId, letter, maxIndex, logEntries) {
     });
 }
 
+// Called on every successful poll for every currently-waiting letter,
+// regardless of whether the prompt changed - the server tracks its own
+// once-per-24h clock per (game, user) and no-ops until it's actually due.
+// This also acts as a safety net for the immediate notifyWait: if that one
+// got missed because every poll in the window failed to render, the first
+// successful poll to observe the same still-waiting letter starts this
+// clock anyway, so the player isn't stuck with no email at all.
+async function notifyReminder(gameJournalId, letter) {
+    await fetchText(`${BASE}/internal/notify-reminder/${KEY}/${gameJournalId}/${letter}`, { method: 'POST' });
+}
+
 async function pollOnce(context) {
     let games;
     try {
@@ -268,9 +284,9 @@ async function pollOnce(context) {
         // looks like a race inside the vendored bundle we can't fix
         // directly), which burns the whole poll with letters always empty.
         // A same-cycle retry on a fresh page cuts the effective miss window
-        // roughly in half instead of waiting for the next 45s+ cycle.
+        // instead of waiting for the next cycle.
         let attempt;
-        for (let n = 0; n < 2; n++) {
+        for (let n = 0; n < MAX_ATTEMPTS; n++) {
             log('opening page for', game.gameJournalId, n > 0 ? '(retry)' : '');
             const page = await context.newPage();
             try {
@@ -302,6 +318,7 @@ async function pollOnce(context) {
                 // first time this letter shows up at all.
                 if (previous.get(letter) !== prompt)
                     await notifyWait(game.gameJournalId, letter, maxIndex, logEntries);
+                await notifyReminder(game.gameJournalId, letter);
                 current.set(letter, prompt);
             }
             // Only update our local view of "who's waiting" on a real read -

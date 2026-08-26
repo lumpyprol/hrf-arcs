@@ -101,11 +101,25 @@ object GoodGame {
 
     val notifiedTurns = TableQuery[NotifiedTurns]
 
+    case class RemindedTurn(journalId : String, userId : String, lastSentAt : Long)
+
+    class RemindedTurns(tag : Tag) extends Table[RemindedTurn](tag, "RemindedTurns") {
+        def journalId = column[String]("journalId")
+        def userId = column[String]("userId")
+        def lastSentAt = column[Long]("lastSentAt")
+        def * = (journalId, userId, lastSentAt).mapTo[RemindedTurn]
+        def pk = primaryKey("RemindedTurns" + "Key", (journalId, userId))
+        def journal = foreignKey("RemindedTurns" + "Journals", journalId, journals)(_.id)
+        def user = foreignKey("RemindedTurns" + "Users", userId, users)(_.id)
+    }
+
+    val remindedTurns = TableQuery[RemindedTurns]
+
 
     object EmailSender {
         def htmlEscape(s : String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
-        def sendTurnEmail(to : String, playerName : String, factionName : String, factionLetter : String, gameTitle : String, link : String, recentLog : List[String])(implicit system : ActorSystem) {
+        def sendTurnEmail(to : String, playerName : String, factionName : String, factionLetter : String, gameTitle : String, link : String, recentLog : List[String], reminder : Boolean = false)(implicit system : ActorSystem) {
             import system.dispatcher
 
             val apiKey = sys.env.getOrElse("RESEND_API_KEY", "")
@@ -126,7 +140,7 @@ object GoodGame {
             val displayName = name + " [" + factionLetter + "]"
             val title = if (gameTitle.nonEmpty) gameTitle else "Arcs"
 
-            val subject = displayName + ": your turn — " + title
+            val subject = displayName + ": " + (if (reminder) "still your turn — " else "your turn — ") + title
 
             // Each entry already arrives as inline-styled HTML matching the
             // in-game log's own colors (see watch.js's nodeToEmailHtml) -
@@ -144,9 +158,15 @@ object GoodGame {
                 else
                     ""
 
+            val turnLine =
+                if (reminder)
+                    "<p>Just a reminder - it's still your turn as <b>" + htmlEscape(factionName) + "</b> in <b>" + htmlEscape(title) + "</b>.</p>"
+                else
+                    "<p>It's your turn as <b>" + htmlEscape(factionName) + "</b> in <b>" + htmlEscape(title) + "</b>.</p>"
+
             val html =
                 "<p>Hi " + htmlEscape(displayName) + ",</p>" +
-                "<p>It's your turn as <b>" + htmlEscape(factionName) + "</b> in <b>" + htmlEscape(title) + "</b>.</p>" +
+                turnLine +
                 logHtml +
                 "<p><a href=\"" + link + "\">Take your turn &rarr;</a></p>"
 
@@ -256,7 +276,7 @@ object GoodGame {
         }
 
         if (mode == "create") {
-            execute(users.schema.create, journals.schema.create, entries.schema.create, accessRights.schema.create, plays.schema.create, notifiedTurns.schema.create)
+            execute(users.schema.create, journals.schema.create, entries.schema.create, accessRights.schema.create, plays.schema.create, notifiedTurns.schema.create, remindedTurns.schema.create)
             println("Created database.")
             return
         }
@@ -265,6 +285,14 @@ object GoodGame {
             println("Unknown mode.")
             return
         }
+
+        // RemindedTurns was added after the production database already
+        // existed - "create" mode (which lays out every table) only ever
+        // runs once, against a brand-new database file (see entrypoint.sh),
+        // so a table added later has to be migrated in here instead, on
+        // every boot of the existing database. createIfNotExists makes this
+        // a no-op on every boot after the first.
+        execute(remindedTurns.schema.createIfNotExists)
 
         implicit val system = ActorSystem()
         implicit val executionContext = system.dispatcher
@@ -627,6 +655,55 @@ object GoodGame {
 
                     complete(StatusCodes.Accepted)
                     }
+                }
+            } ~
+            (post & path("internal" / "notify-reminder" / Segment / Segment / Segment)) { case (key, gameJournalId, letter) =>
+                if (internalKey.isEmpty || key != internalKey)
+                    complete(StatusCodes.Forbidden, "")
+                else {
+                    val lobbyIds = execute(plays.map(_.journalId).result).distinct
+                    val found = lobbyIds.flatMap { lobbyId =>
+                        val entryLines = execute(entries.filter(_.journalId === lobbyId).sortBy(_.index).map(_.text).result).toList
+                        val info = parseLobby(entryLines)
+                        if (info.gameJournalId == gameJournalId) Some((lobbyId, info)) else None
+                    }.headOption
+
+                    found.foreach { case (lobbyId, info) =>
+                        info.letterToUserId.get(letter).foreach { targetUserId =>
+                            val lastSent = execute(remindedTurns.filter(n => n.journalId === gameJournalId && n.userId === targetUserId).map(_.lastSentAt).result.headOption)
+                            val now = System.currentTimeMillis()
+                            val dayMs = 24L * 60 * 60 * 1000
+
+                            lastSent match {
+                                // First time we've ever seen this user waiting here -
+                                // they just got (or should have gotten) the immediate
+                                // turn email via notify-wait/notify-turn, so this only
+                                // starts the clock rather than sending right away.
+                                case None =>
+                                    execute(remindedTurns += RemindedTurn(gameJournalId, targetUserId, now))
+                                case Some(t) if now - t >= dayMs =>
+                                    execute(remindedTurns.filter(n => n.journalId === gameJournalId && n.userId === targetUserId).map(_.lastSentAt).update(now))
+
+                                    val targetUser = execute(users.filter(_.id === targetUserId).result.headOption)
+                                    val secret = execute(plays.filter(p => p.journalId === lobbyId && p.userId === targetUserId).map(_.secret).result.headOption)
+
+                                    (targetUser, secret) match {
+                                        case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
+                                            val playerName = info.letterToName.getOrElse(letter, u.name)
+                                            EmailSender.sendTurnEmail(u.email.get, playerName, factionName(letter), letter, info.title, url + "/play/" + info.meta + "/" + s, Nil, reminder = true)
+                                        case (Some(_), Some(_)) =>
+                                            println("Skipping reminder email for " + targetUserId + " (" + gameJournalId + "): no email address registered")
+                                        case (Some(_), None) =>
+                                            println("Skipping reminder email for " + targetUserId + " (" + gameJournalId + "): no play/secret found on lobby " + lobbyId)
+                                        case (None, _) =>
+                                            println("Skipping reminder email for " + targetUserId + " (" + gameJournalId + "): user record not found")
+                                    }
+                                case _ => // not due yet
+                            }
+                        }
+                    }
+
+                    complete(StatusCodes.Accepted)
                 }
             }
         } }
