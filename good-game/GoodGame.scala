@@ -519,7 +519,12 @@ object GoodGame {
                                         val since = alreadyIdx.getOrElse(0)
                                         val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
                                         EmailSender.sendTurnEmail(u.email.get, u.name, factionName, factionName.take(1), journal.name, url + "/play/" + metaName + "/" + s, recentLog)
-                                    case _ =>
+                                    case (Some(_), Some(_)) =>
+                                        println("Skipping turn email for " + targetUserId + " (" + journalId + "): no email address registered")
+                                    case (Some(_), None) =>
+                                        println("Skipping turn email for " + targetUserId + " (" + journalId + "): no play/secret found on lobby " + lobbyId)
+                                    case (None, _) =>
+                                        println("Skipping turn email for " + targetUserId + " (" + journalId + "): user record not found")
                                 }
                             }
                         }
@@ -609,7 +614,12 @@ object GoodGame {
                                         val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
                                         val playerName = info.letterToName.getOrElse(letter, u.name)
                                         EmailSender.sendTurnEmail(u.email.get, playerName, factionName(letter), letter, info.title, url + "/play/" + info.meta + "/" + s, recentLog)
-                                    case _ =>
+                                    case (Some(_), Some(_)) =>
+                                        println("Skipping turn email for " + targetUserId + " (" + gameJournalId + "): no email address registered")
+                                    case (Some(_), None) =>
+                                        println("Skipping turn email for " + targetUserId + " (" + gameJournalId + "): no play/secret found on lobby " + lobbyId)
+                                    case (None, _) =>
+                                        println("Skipping turn email for " + targetUserId + " (" + gameJournalId + "): user record not found")
                                 }
                             }
                         }
