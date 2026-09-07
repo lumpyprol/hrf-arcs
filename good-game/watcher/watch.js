@@ -32,7 +32,7 @@ if (!KEY) {
     process.exit(0);
 }
 
-const lastSeen = new Map(); // gameJournalId -> Map(letter -> last-notified prompt text)
+const lastSeen = new Map(); // gameJournalId -> Map(letter -> {prompt, maxIndex} last notified)
 
 function log(...args) {
     console.log('[watcher]', new Date().toISOString(), ...args);
@@ -311,15 +311,28 @@ async function pollOnce(context) {
             const current = new Map(previous);
             for (const letter of letters) {
                 const prompt = letterToPrompt[letter] || '';
+                const prevState = previous.get(letter);
                 // A letter can stay "waiting" continuously across many polls
                 // through a multi-step turn (negotiate, then rearrange a
                 // resource, ...) without ever clearing - re-notify whenever
                 // what they're actually being asked changes, not only the
                 // first time this letter shows up at all.
-                if (previous.get(letter) !== prompt)
+                //
+                // Prompt text alone isn't enough of a key, though: short
+                // prompts like "Yellow leads" recur verbatim every round,
+                // not just once per game. Comparing text only means the
+                // first time it's ever seen gets notified and then every
+                // later round with the identical wording silently never
+                // does again, for as long as this process stays up (weeks,
+                // in production). maxIndex only ever increases across real
+                // rounds but can legitimately stay flat within one player's
+                // own multi-step turn, so OR-ing it in catches a genuinely
+                // new round with recycled text without breaking the
+                // multi-step case this was built for.
+                if (!prevState || prevState.prompt !== prompt || prevState.maxIndex !== maxIndex)
                     await notifyWait(game.gameJournalId, letter, maxIndex, logEntries);
                 await notifyReminder(game.gameJournalId, letter);
-                current.set(letter, prompt);
+                current.set(letter, { prompt, maxIndex });
             }
             // Only update our local view of "who's waiting" on a real read -
             // an empty result usually just means the page hadn't finished
