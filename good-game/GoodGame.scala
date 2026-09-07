@@ -290,9 +290,17 @@ object GoodGame {
         // existed - "create" mode (which lays out every table) only ever
         // runs once, against a brand-new database file (see entrypoint.sh),
         // so a table added later has to be migrated in here instead, on
-        // every boot of the existing database. createIfNotExists makes this
-        // a no-op on every boot after the first.
-        execute(remindedTurns.schema.createIfNotExists)
+        // every boot of the existing database. Slick's createIfNotExists
+        // probes for the table via an ALTER TABLE ... DROP CONSTRAINT IF
+        // EXISTS HSQLDB doesn't support ("user lacks privilege or object
+        // not found: IF") and crashes the whole server before it ever
+        // reaches the real create - plain create, with the "already
+        // exists" failure just swallowed, is the boring reliable version.
+        try {
+            execute(remindedTurns.schema.create)
+        } catch {
+            case _ : Throwable => // already exists from a previous boot
+        }
 
         implicit val system = ActorSystem()
         implicit val executionContext = system.dispatcher
