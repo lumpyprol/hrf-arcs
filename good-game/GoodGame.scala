@@ -302,6 +302,18 @@ object GoodGame {
             case _ : Throwable => // already exists from a previous boot
         }
 
+        // NotifiedTurns predates the prompt-aware dedup - see
+        // NOTIFICATION_DEDUP_PLAN.md. Same story as RemindedTurns above: the
+        // column has to be added on every boot of the existing database, with
+        // plain hand-written DDL (verified against HSQLDB 2.7.4 in
+        // NotifiedTurnsMigrationTest, not schema.createIfNotExists) and the
+        // "column already exists" failure swallowed for idempotency.
+        try {
+            execute(Migrations.addNotifiedTurnsLastPrompt)
+        } catch {
+            case _ : Throwable => // column already exists from a previous boot
+        }
+
         implicit val system = ActorSystem()
         implicit val executionContext = system.dispatcher
 
