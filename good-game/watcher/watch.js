@@ -6,8 +6,6 @@
 // headless browser and read the "<Faction> <does something>" prompt banner
 // that the client already renders for every wait-for-input state.
 
-const { chromium } = require('playwright');
-
 const PORT = process.env.ARCS_PORT || '7070';
 const BASE = `http://localhost:${PORT}`;
 // The server templates <base href> to the public ARCS_URL regardless of how
@@ -26,13 +24,6 @@ const POLL_INTERVAL_MS = parseInt(process.env.WATCHER_POLL_MS || '25000', 10);
 // shrinks the odds a fast turn starts and ends without any of them
 // succeeding, at the cost of that many more page loads on a bad cycle.
 const MAX_ATTEMPTS = parseInt(process.env.WATCHER_MAX_ATTEMPTS || '3', 10);
-
-if (!KEY) {
-    console.log('[watcher] INTERNAL_API_KEY not set, watcher disabled');
-    process.exit(0);
-}
-
-const lastSeen = new Map(); // gameJournalId -> Map(letter -> {prompt, maxIndex} last notified)
 
 function log(...args) {
     console.log('[watcher]', new Date().toISOString(), ...args);
@@ -240,19 +231,22 @@ async function inspectGame(page, game) {
     };
 }
 
-async function notifyWait(gameJournalId, letter, maxIndex, logEntries) {
-    log('notifying', gameJournalId, letter, 'up to', maxIndex);
-    // The server independently dedupes by (gameJournalId, targetUser, index)
-    // via NotifiedTurns, so re-notifying the same actual state is harmless -
-    // this is not the only thing standing between a player and a duplicate
-    // email.
-    const body = [`INDEX ${maxIndex}`]
+function buildWaitBody(maxIndex, prompt, logEntries) {
+    // The server (NotifyDecision.shouldNotify, keyed on both index and this
+    // PROMPT line) is the sole authority on whether this is a duplicate - we
+    // report raw observed state on every poll and let it decide. See
+    // NOTIFICATION_DEDUP_PLAN.md.
+    return [`INDEX ${maxIndex}`, `PROMPT ${(prompt || '').replace(/\s+/g, ' ').trim()}`]
         .concat(logEntries.map(e => `LOG ${e.num}\t${e.html}`))
         .join('\n');
+}
+
+async function notifyWait(gameJournalId, letter, maxIndex, prompt, logEntries) {
+    log('notifying', gameJournalId, letter, 'up to', maxIndex, JSON.stringify(prompt));
     await fetchText(`${BASE}/internal/notify-wait/${KEY}/${gameJournalId}/${letter}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body,
+        body: buildWaitBody(maxIndex, prompt, logEntries),
     });
 }
 
@@ -265,6 +259,18 @@ async function notifyWait(gameJournalId, letter, maxIndex, logEntries) {
 // clock anyway, so the player isn't stuck with no email at all.
 async function notifyReminder(gameJournalId, letter) {
     await fetchText(`${BASE}/internal/notify-reminder/${KEY}/${gameJournalId}/${letter}`, { method: 'POST' });
+}
+
+// For every currently-waiting letter on this poll, unconditionally report to
+// the server - no local "have we seen this already" cache. notifyWait and
+// notifyReminder both no-op server-side when the state isn't actually new
+// (NotifiedTurns / the once-per-24h reminder clock).
+async function reportWaiting(game, attempt) {
+    const { letters, letterToPrompt, maxIndex, logEntries } = attempt;
+    for (const letter of letters) {
+        await notifyWait(game.gameJournalId, letter, maxIndex, letterToPrompt[letter] || '', logEntries);
+        await notifyReminder(game.gameJournalId, letter);
+    }
 }
 
 async function pollOnce(context) {
@@ -306,38 +312,7 @@ async function pollOnce(context) {
         if (!attempt) continue;
 
         try {
-            const { letters, letterToPrompt, maxIndex, logEntries } = attempt;
-            const previous = lastSeen.get(game.gameJournalId) || new Map();
-            const current = new Map(previous);
-            for (const letter of letters) {
-                const prompt = letterToPrompt[letter] || '';
-                const prevState = previous.get(letter);
-                // A letter can stay "waiting" continuously across many polls
-                // through a multi-step turn (negotiate, then rearrange a
-                // resource, ...) without ever clearing - re-notify whenever
-                // what they're actually being asked changes, not only the
-                // first time this letter shows up at all.
-                //
-                // Prompt text alone isn't enough of a key, though: short
-                // prompts like "Yellow leads" recur verbatim every round,
-                // not just once per game. Comparing text only means the
-                // first time it's ever seen gets notified and then every
-                // later round with the identical wording silently never
-                // does again, for as long as this process stays up (weeks,
-                // in production). maxIndex only ever increases across real
-                // rounds but can legitimately stay flat within one player's
-                // own multi-step turn, so OR-ing it in catches a genuinely
-                // new round with recycled text without breaking the
-                // multi-step case this was built for.
-                if (!prevState || prevState.prompt !== prompt || prevState.maxIndex !== maxIndex)
-                    await notifyWait(game.gameJournalId, letter, maxIndex, logEntries);
-                await notifyReminder(game.gameJournalId, letter);
-                current.set(letter, { prompt, maxIndex });
-            }
-            // Only update our local view of "who's waiting" on a real read -
-            // an empty result usually just means the page hadn't finished
-            // rendering yet, not that nobody's waiting anymore.
-            if (letters.length > 0) lastSeen.set(game.gameJournalId, current);
+            await reportWaiting(game, attempt);
         } catch (e) {
             log('error polling game', game.gameJournalId, e.message);
         }
@@ -347,6 +322,7 @@ async function pollOnce(context) {
 }
 
 async function main() {
+    const { chromium } = require('playwright');
     log('starting, polling every', POLL_INTERVAL_MS, 'ms');
     // This game likely leans on canvas/WebGL for the map, which headless
     // Chromium can silently fail to initialize without these flags.
@@ -367,7 +343,15 @@ async function main() {
     }
 }
 
-main().catch(e => {
-    console.error('[watcher] fatal:', e);
-    process.exit(1);
-});
+if (require.main === module) {
+    if (!KEY) {
+        console.log('[watcher] INTERNAL_API_KEY not set, watcher disabled');
+        process.exit(0);
+    }
+    main().catch(e => {
+        console.error('[watcher] fatal:', e);
+        process.exit(1);
+    });
+}
+
+module.exports = { buildWaitBody, notifyWait, notifyReminder, reportWaiting };
