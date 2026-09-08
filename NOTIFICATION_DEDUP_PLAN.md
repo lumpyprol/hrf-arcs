@@ -113,7 +113,13 @@ Everything below is one continuous prompt chain, not a description of steps — 
 
 ---
 
-### Prompt 5 — TDD the route contracts
+### Prompt 5 — TDD the route contracts — ✅ COMPLETED
+
+> **Done:** `notify-turn` and `notify-wait` extracted from `GoodGame.main` into `good-game/NotifyRoutes.scala` (`class NotifyRoutes(db, baseUrl, internalKey, sendEmail)`), both now just parse their wire format and call `TurnNotifier.dispatch` — the old duplicated `NotifiedTurns`-check / user-lookup / three-case skip-match blocks are deleted from `GoodGame.scala`. `notify-wait` now reads an optional `PROMPT <text>` line (`promptOpt = Some(text)`); `notify-turn` is unchanged on the wire (`promptOpt = None`, index-only). `main` mounts `~ notifyRoutes.route` and passes an adapter onto `EmailSender.sendTurnEmail`.
+>
+> **Deviation from the plan's letter:** used `akka.http.scaladsl.server.Route.toFunction` (the primitive `akka-http-testkit` itself wraps) rather than adding the `akka-http-testkit` dep + a munit/ScalaTest bridge — same route-level coverage, no new dependency, no test-framework glue. Also did the characterization + rewire in one pass rather than two commits, because the route bodies couldn't be lifted into a test harness *without* being the rewire.
+>
+> `good-game/src/test/scala/NotifyRoutesTest.scala` (real in-mem HSQLDB, fake `sendEmail`, prod's `NoSuchElementException`→403 handler applied): notify-turn sends once / dedups on repeat / re-sends on higher index / 403 on bad secret; notify-wait 403 on wrong key / PROMPT drives same-index multi-step re-notify / higher-index recycled prompt still sends / missing PROMPT still works. `sbt test` 25/25, `sbt compile` clean, and a real boot against a fresh file DB prints `Started server.` with the migration running clean and the routes returning 403s as expected.
 
 > Read `NOTIFICATION_DEDUP_PLAN.md` for context; this is Prompt 5, following the shared helper landed in Prompt 4.
 >
