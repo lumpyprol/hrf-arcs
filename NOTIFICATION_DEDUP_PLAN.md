@@ -97,7 +97,9 @@ Everything below is one continuous prompt chain, not a description of steps — 
 
 ---
 
-### Prompt 4 — TDD the shared dispatch helper
+### Prompt 4 — TDD the shared dispatch helper — ✅ COMPLETED
+
+> **Done:** `good-game/TurnNotifier.scala` — `class TurnNotifier(db, baseUrl, sendEmail, log)` with `dispatch(journalId, userId, lobbyId, index, promptOpt, logEntries, info)`, dedup delegated entirely to `NotifyDecision.shouldNotify`. `sendEmail` and `log` are injected (fakes in tests). `good-game/src/test/scala/TurnNotifierTest.scala` runs it against a real in-memory HSQLDB for both `promptOpt = None` and `Some(...)`: the actual-send branch (asserts exact `Outgoing` args), and all three skip branches (no email / no secret / no user) with their exact log lines; plus dedup-delegation and the recycled-prompt regression. Confirmed red first. `NotifiedTurn` case class + Slick table now carry `lastPrompt` (defaulted, so the still-present old route blocks keep compiling). `dispatch` looks up user/secret *before* writing `NotifiedTurns` (that table FKs to Users) and marks-notified in every branch except no-user, so unconditional re-polls (Prompt 6) won't spam. Old duplicated route blocks left in place. `sbt test` 20/20, `sbt compile` clean.
 
 > Read `NOTIFICATION_DEDUP_PLAN.md` for context; this is Prompt 4, following the migration landed in Prompt 3.
 >
