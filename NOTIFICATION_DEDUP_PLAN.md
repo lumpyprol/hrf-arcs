@@ -141,7 +141,11 @@ Everything below is one continuous prompt chain, not a description of steps — 
 
 ---
 
-### Prompt 7 — final integration pass and deploy
+### Prompt 7 — final integration pass and deploy — ⏳ TESTS DONE, DEPLOY PENDING
+
+> **Done (local):** Full suite green together — `sbt test` 25/25, `node --test good-game/watcher/test/*.test.js` 6/6. Every "Regression test matrix" row below now maps to a passing test (see the ✅ column added there). Migration DDL re-verified: `NotifiedTurnsMigrationTest` executes the exact `ALTER TABLE ... ADD COLUMN "lastPrompt" VARCHAR(50000) DEFAULT ''` against real HSQLDB 2.7.4 (prod's version) and asserts it applies + is idempotent. Dockerfile runs `sbt compile` only (no test-scope surprises); `munit` is `% Test`.
+>
+> **Pending — requires explicit operator go-ahead (real production `arcs.lumpy-arcs.com`):** `docker compose build && docker compose up -d`, then `docker logs hrf-arcs` shows `Started server.` and stays stable several minutes, then confirm from prod logs that a genuinely new transition with recycled prompt text logs `notifying` while a stable repeated-poll wait stays silent.
 
 > Read `NOTIFICATION_DEDUP_PLAN.md` for context; this is Prompt 7, the last step, following Prompts 1-6 all landed and green.
 >
@@ -149,14 +153,15 @@ Everything below is one continuous prompt chain, not a description of steps — 
 
 ## Regression test matrix (explicit bug → test)
 
-| Bug hit this session | Test |
-|---|---|
-| Recurring prompt text ("Yellow leads") suppresses real notifications | `NotifyDecisionTest`: higher-index-same-prompt case |
-| 152-poll stuck-state correctly silent | `NotifyDecisionTest`: same-index-same-prompt case |
-| Multi-step turn (negotiate → rearrange) | `NotifyDecisionTest`: same-index-different-prompt case |
-| Silent skip on missing email/secret | Shared-dispatch-helper test, all three skip branches |
-| `createIfNotExists` crash-loop | Migration test run twice for idempotency |
-| `notify-turn`'s existing contract | `promptOpt = None` cases in `NotifyDecisionTest` + route test |
+| Bug hit this session | Test | ✅ |
+|---|---|---|
+| Recurring prompt text ("Yellow leads") suppresses real notifications | `NotifyDecisionTest` "higher index, same prompt -> notify (the production regression)"; `TurnNotifierTest` "higher index with the same recycled prompt still notifies"; `NotifyRoutesTest` "PROMPT line drives multi-step re-notify" (higher-index recycled-prompt call) | ✅ |
+| 152-poll stuck-state correctly silent | `NotifyDecisionTest` "152 consecutive identical polls -> silent" & "same index, same prompt -> silent"; `TurnNotifierTest` "second identical dispatch is silent"; `NotifyRoutesTest` "missing PROMPT line still notifies once, then dedups on index" | ✅ |
+| Multi-step turn (negotiate → rearrange) | `NotifyDecisionTest` "same index, different prompt (multi-step turn) -> notify"; `NotifyRoutesTest` "PROMPT line drives multi-step re-notify at the same index" | ✅ |
+| Silent skip on missing email/secret | `TurnNotifierTest` — all three skip branches, for both `promptOpt = None` and `Some` | ✅ |
+| `createIfNotExists` crash-loop | `NotifiedTurnsMigrationTest` "running the same migration a second time does not throw (idempotent)" | ✅ |
+| `notify-turn`'s existing contract | `NotifyDecisionTest` "index-only mode (promptOpt = None)"; `NotifyRoutesTest` "notify-turn: no PROMPT line, sends once, dedups on repeat, re-sends on higher index" | ✅ |
+| Watcher reports unconditionally every poll, with prompt text | `report.test.js` "reportWaiting is unconditional…" & "…once per waiting letter, with the prompt text" & "no lastSeen-style local dedup cache" | ✅ |
 
 Two bugs from earlier in the session are outside this refactor's direct scope but share the same new test harness cheaply — worth a follow-up, not blocking: `parseLobby` first-vs-last-line (`good-game/GoodGame.scala:201`) and the `AccessRights` 500→403 handler.
 
@@ -166,8 +171,8 @@ Two bugs from earlier in the session are outside this refactor's direct scope bu
 - After deploy, confirm via logs: a genuinely new transition fires `notifying`, and repeated polls of the same state don't.
 
 ## Definition of done
-- `sbt test` and `node --test` both green in CI-equivalent local run.
-- Both duplicated route blocks replaced by one shared helper.
-- `watch.js`'s `lastSeen` map is gone.
-- All regression-matrix cases above pass and are checked into the repo, not just verified manually.
-- Production log evidence: a new-round transition with recycled prompt text correctly notifies; a stable multi-poll wait correctly doesn't.
+- ✅ `sbt test` (25) and `node --test` (6) both green in CI-equivalent local run.
+- ✅ Both duplicated route blocks replaced by one shared helper (`TurnNotifier`, via `NotifyRoutes`).
+- ✅ `watch.js`'s `lastSeen` map is gone.
+- ✅ All regression-matrix cases above pass and are checked into the repo, not just verified manually.
+- ⏳ Production log evidence: a new-round transition with recycled prompt text correctly notifies; a stable multi-poll wait correctly doesn't. *(awaits the deploy)*
