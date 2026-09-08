@@ -87,13 +87,17 @@ object GoodGame {
     val plays = TableQuery[Plays]
 
 
-    case class NotifiedTurn(journalId : String, userId : String, index : Int)
+    // lastPrompt defaults so the pre-existing 3-arg NotifiedTurn(...) call sites
+    // keep compiling; it's migrated onto the live table in main's startup path
+    // (see Migrations.addNotifiedTurnsLastPrompt).
+    case class NotifiedTurn(journalId : String, userId : String, index : Int, lastPrompt : String = "")
 
     class NotifiedTurns(tag : Tag) extends Table[NotifiedTurn](tag, "NotifiedTurns") {
         def journalId = column[String]("journalId")
         def userId = column[String]("userId")
         def index = column[Int]("index")
-        def * = (journalId, userId, index).mapTo[NotifiedTurn]
+        def lastPrompt = column[String]("lastPrompt")
+        def * = (journalId, userId, index, lastPrompt).mapTo[NotifiedTurn]
         def pk = primaryKey("NotifiedTurns" + "Key", (journalId, userId))
         def journal = foreignKey("NotifiedTurns" + "Journals", journalId, journals)(_.id)
         def user = foreignKey("NotifiedTurns" + "Users", userId, users)(_.id)
