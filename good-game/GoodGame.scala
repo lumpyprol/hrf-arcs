@@ -333,6 +333,13 @@ object GoodGame {
 
         val internalKey = sys.env.getOrElse("INTERNAL_API_KEY", "")
 
+        // notify-turn / notify-wait live in NotifyRoutes now (one shared
+        // dedup+dispatch path - see NOTIFICATION_DEDUP_PLAN.md); the adapter
+        // just unpacks TurnNotifier.Outgoing onto the real email sender.
+        val notifyRoutes = new NotifyRoutes(db, url, internalKey, out =>
+            EmailSender.sendTurnEmail(out.to, out.playerName, out.factionName, out.factionLetter, out.gameTitle, out.link, out.recentLog)
+        )
+
         def html(s : String) = complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, s))
         def plain(s : String) = complete(HttpEntity(ContentTypes.`text/plain(UTF-8)`, s))
         def redir(s : String) = redirect(s, StatusCodes.SeeOther)
@@ -524,67 +531,6 @@ object GoodGame {
                     }
                 }
             } ~
-            (post & path("notify-turn" / Segment / Segment / Segment / Segment / IntNumber)) { case (userId, userSecret, journalId, lobbyId, index) =>
-                decodeRequest {
-                    entity(as[String]) { body =>
-                        val lines = body.split('\n').toList
-
-                        val metaName = lines.find(_.startsWith("META ")).map(_.drop(5).take(32).ascii).getOrElse("")
-
-                        val targetFactions = lines.filter(_.startsWith("TARGET ")).flatMap { l =>
-                            val rest = l.drop(7)
-                            val sp = rest.indexOf(' ')
-                            if (sp > 0) Some(rest.take(sp).take(32).ascii -> rest.drop(sp + 1).take(32).ascii) else None
-                        }.filter(_._1.nonEmpty).distinct
-
-                        val logEntries = lines.filter(_.startsWith("LOG ")).flatMap { l =>
-                            val rest = l.drop(4)
-                            val tab = rest.indexOf('\t')
-                            if (tab > 0)
-                                scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(200).asciiplus)
-                            else None
-                        }
-
-                        // any client with the journal open can independently detect a wait transition and
-                        // call this, so require only read access, not append
-                        val journal = execute(hasRight(userId, userSecret, journalId, "read") {
-                            journals.filter(_.id === journalId).result.head
-                        })
-
-                        targetFactions.foreach { case (targetUserId, factionName) =>
-                            val alreadyIdx = execute(notifiedTurns.filter(n => n.journalId === journalId && n.userId === targetUserId).map(_.index).result.headOption)
-
-                            if (alreadyIdx.forall(_ < index)) {
-                                execute(
-                                    if (alreadyIdx.isDefined)
-                                        notifiedTurns.filter(n => n.journalId === journalId && n.userId === targetUserId).map(_.index).update(index)
-                                    else
-                                        notifiedTurns += NotifiedTurn(journalId, targetUserId, index)
-                                )
-
-                                val targetUser = execute(users.filter(_.id === targetUserId).result.headOption)
-                                // Plays rows are keyed by the lobby journal, not the per-chapter game journal
-                                val secret = execute(plays.filter(p => p.journalId === lobbyId && p.userId === targetUserId).map(_.secret).result.headOption)
-
-                                (targetUser, secret) match {
-                                    case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
-                                        val since = alreadyIdx.getOrElse(0)
-                                        val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
-                                        EmailSender.sendTurnEmail(u.email.get, u.name, factionName, factionName.take(1), journal.name, url + "/play/" + metaName + "/" + s, recentLog)
-                                    case (Some(_), Some(_)) =>
-                                        println("Skipping turn email for " + targetUserId + " (" + journalId + "): no email address registered")
-                                    case (Some(_), None) =>
-                                        println("Skipping turn email for " + targetUserId + " (" + journalId + "): no play/secret found on lobby " + lobbyId)
-                                    case (None, _) =>
-                                        println("Skipping turn email for " + targetUserId + " (" + journalId + "): user record not found")
-                                }
-                            }
-                        }
-
-                        complete(StatusCodes.Accepted)
-                    }
-                }
-            } ~
             (get & path("internal" / "active-games" / Segment)) { key =>
                 if (internalKey.isEmpty || key != internalKey)
                     complete(StatusCodes.Forbidden, "")
@@ -613,72 +559,6 @@ object GoodGame {
                 else {
                     val entryLines = execute(entries.filter(_.journalId === journalId).sortBy(_.index).map(_.text).result).toList
                     plain(entryLines.mkString("\n"))
-                }
-            } ~
-            (post & path("internal" / "notify-wait" / Segment / Segment / Segment)) { case (key, gameJournalId, letter) =>
-                if (internalKey.isEmpty || key != internalKey)
-                    complete(StatusCodes.Forbidden, "")
-                else decodeRequest {
-                    entity(as[String]) { body =>
-                    val bodyLines = body.split('\n').toList
-                    val maxIndex = bodyLines.find(_.startsWith("INDEX ")).map(_.drop(6).trim.toInt).getOrElse(0)
-                    val logEntries = bodyLines.filter(_.startsWith("LOG ")).flatMap { l =>
-                        val rest = l.drop(4)
-                        val tab = rest.indexOf('\t')
-                        // Each entry is now inline-styled HTML (see watch.js's
-                        // nodeToEmailHtml), which runs noticeably longer per
-                        // line than the old plain text - resource/dice icons
-                        // in particular are inlined as data: URI <img> tags,
-                        // a few KB apiece and sometimes several per line (a
-                        // dice roll), so this needs much more room than the
-                        // handful of "<span style=\"color:rgb(...)\">" wrappers
-                        // colored text alone would need.
-                        if (tab > 0)
-                            scala.util.Try(rest.take(tab).toInt).toOption.map(idx => idx -> rest.drop(tab + 1).take(50000).asciiplus)
-                        else None
-                    }
-
-                    val lobbyIds = execute(plays.map(_.journalId).result).distinct
-                    val found = lobbyIds.flatMap { lobbyId =>
-                        val entryLines = execute(entries.filter(_.journalId === lobbyId).sortBy(_.index).map(_.text).result).toList
-                        val info = parseLobby(entryLines)
-                        if (info.gameJournalId == gameJournalId) Some((lobbyId, info)) else None
-                    }.headOption
-
-                    found.foreach { case (lobbyId, info) =>
-                        info.letterToUserId.get(letter).foreach { targetUserId =>
-                            val alreadyIdx = execute(notifiedTurns.filter(n => n.journalId === gameJournalId && n.userId === targetUserId).map(_.index).result.headOption)
-
-                            if (alreadyIdx.forall(_ < maxIndex)) {
-                                execute(
-                                    if (alreadyIdx.isDefined)
-                                        notifiedTurns.filter(n => n.journalId === gameJournalId && n.userId === targetUserId).map(_.index).update(maxIndex)
-                                    else
-                                        notifiedTurns += NotifiedTurn(gameJournalId, targetUserId, maxIndex)
-                                )
-
-                                val targetUser = execute(users.filter(_.id === targetUserId).result.headOption)
-                                val secret = execute(plays.filter(p => p.journalId === lobbyId && p.userId === targetUserId).map(_.secret).result.headOption)
-
-                                (targetUser, secret) match {
-                                    case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
-                                        val since = alreadyIdx.getOrElse(0)
-                                        val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
-                                        val playerName = info.letterToName.getOrElse(letter, u.name)
-                                        EmailSender.sendTurnEmail(u.email.get, playerName, factionName(letter), letter, info.title, url + "/play/" + info.meta + "/" + s, recentLog)
-                                    case (Some(_), Some(_)) =>
-                                        println("Skipping turn email for " + targetUserId + " (" + gameJournalId + "): no email address registered")
-                                    case (Some(_), None) =>
-                                        println("Skipping turn email for " + targetUserId + " (" + gameJournalId + "): no play/secret found on lobby " + lobbyId)
-                                    case (None, _) =>
-                                        println("Skipping turn email for " + targetUserId + " (" + gameJournalId + "): user record not found")
-                                }
-                            }
-                        }
-                    }
-
-                    complete(StatusCodes.Accepted)
-                    }
                 }
             } ~
             (post & path("internal" / "notify-reminder" / Segment / Segment / Segment)) { case (key, gameJournalId, letter) =>
@@ -729,7 +609,8 @@ object GoodGame {
 
                     complete(StatusCodes.Accepted)
                 }
-            }
+            } ~
+            notifyRoutes.route
         } }
 
         val settings = ServerSettings("").withRemoteAddressAttribute(true)
