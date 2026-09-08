@@ -129,7 +129,9 @@ Everything below is one continuous prompt chain, not a description of steps — 
 
 ---
 
-### Prompt 6 — TDD `watch.js`'s unconditional reporting
+### Prompt 6 — TDD `watch.js`'s unconditional reporting — ✅ COMPLETED
+
+> **Done:** `lastSeen` map and its gating `if` are deleted from `watch.js`. The per-letter loop body is extracted into `reportWaiting(game, attempt)`, which calls `notifyWait` + `notifyReminder` unconditionally for every currently-waiting letter every poll. `notifyWait` now takes `prompt` and its body (built by the new `buildWaitBody`) carries a `PROMPT <text>` line (whitespace-collapsed, empty-tolerant). `watch.js` now only runs `main()` under `require.main === module` and exports `{ buildWaitBody, notifyWait, notifyReminder, reportWaiting }`; the `playwright` require is lazy (inside `main`) so tests can load the module. `good-game/watcher/test/report.test.js` (stubbed `global.fetch`) asserts: body shape, unconditional re-fire on an identical second poll, prompt text present per letter, and that the source no longer contains `lastSeen`. `node --check watch.js` clean, `npm test` 6/6, `sbt test` still 25/25.
 
 > Read `NOTIFICATION_DEDUP_PLAN.md` for context; this is Prompt 6, following the server-side rewiring landed in Prompt 5.
 >
