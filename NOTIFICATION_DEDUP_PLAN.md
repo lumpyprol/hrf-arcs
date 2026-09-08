@@ -85,7 +85,9 @@ Everything below is one continuous prompt chain, not a description of steps — 
 
 ---
 
-### Prompt 3 — TDD the schema migration
+### Prompt 3 — TDD the schema migration — ✅ COMPLETED
+
+> **Done:** `good-game/src/test/scala/NotifiedTurnsMigrationTest.scala` boots a real in-memory HSQLDB 2.7.4 (same version prod uses), creates `NotifiedTurns` in its pre-migration shape, and asserts the column is added, existing rows backfill to `""`, and a second run doesn't throw. Confirmed red (no `hrf.gg.Migrations`) first. The DDL lives in a new `good-game/Migrations.scala` as `addNotifiedTurnsLastPrompt` (`ALTER TABLE "NotifiedTurns" ADD COLUMN "lastPrompt" VARCHAR(50000) DEFAULT ''`) — its HSQLDB validity is proven by the passing test actually executing it. Wired into `GoodGame.scala`'s startup right after the `RemindedTurns` migration, plain SQL in try/catch, **not** `schema.createIfNotExists`. Routes still untouched; the Slick table mapping still doesn't expose the column (that's Prompt 4/5). `sbt test` 10/10, `sbt compile` clean.
 
 > Read `NOTIFICATION_DEDUP_PLAN.md` for context; this is Prompt 3, following the core decision function landed in Prompt 2.
 >
