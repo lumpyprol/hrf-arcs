@@ -65,7 +65,9 @@ Everything below is one continuous prompt chain, not a description of steps — 
 
 ---
 
-### Prompt 2 — TDD the core decision function
+### Prompt 2 — TDD the core decision function — ✅ COMPLETED
+
+> **Done:** `good-game/src/test/scala/NotifyDecisionTest.scala` covers all eight cases (incl. the higher-index-same-prompt regression and the 152-poll stuck state); confirmed red (did not compile) before implementing. `NotifyDecision` lives in a new file `good-game/NotifyDecision.scala` (pure, DB-free) exactly as the "Target design" snippet. `sbt test` green (8/8), `sbt compile` clean. Routes untouched.
 
 > Read `NOTIFICATION_DEDUP_PLAN.md` for context; this is Prompt 2, following the test harness landed in Prompt 1.
 >
