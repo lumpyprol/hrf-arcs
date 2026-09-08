@@ -141,11 +141,13 @@ Everything below is one continuous prompt chain, not a description of steps — 
 
 ---
 
-### Prompt 7 — final integration pass and deploy — ⏳ TESTS DONE, DEPLOY PENDING
+### Prompt 7 — final integration pass and deploy — ✅ COMPLETED
 
-> **Done (local):** Full suite green together — `sbt test` 25/25, `node --test good-game/watcher/test/*.test.js` 6/6. Every "Regression test matrix" row below now maps to a passing test (see the ✅ column added there). Migration DDL re-verified: `NotifiedTurnsMigrationTest` executes the exact `ALTER TABLE ... ADD COLUMN "lastPrompt" VARCHAR(50000) DEFAULT ''` against real HSQLDB 2.7.4 (prod's version) and asserts it applies + is idempotent. Dockerfile runs `sbt compile` only (no test-scope surprises); `munit` is `% Test`.
+> **Done (local):** Full suite green together — `sbt test` 25/25, `node --test good-game/watcher/test/*.test.js` 6/6. Every "Regression test matrix" row below maps to a passing test (see the ✅ column). Migration DDL re-verified: `NotifiedTurnsMigrationTest` executes the exact `ALTER TABLE ... ADD COLUMN "lastPrompt" VARCHAR(50000) DEFAULT ''` against real HSQLDB 2.7.4 and asserts it applies + is idempotent.
 >
-> **Pending — requires explicit operator go-ahead (real production `arcs.lumpy-arcs.com`):** `docker compose build && docker compose up -d`, then `docker logs hrf-arcs` shows `Started server.` and stays stable several minutes, then confirm from prod logs that a genuinely new transition with recycled prompt text logs `notifying` while a stable repeated-poll wait stays silent.
+> **Deployed 2026-09-08 ~14:16 UTC** to production `arcs.lumpy-arcs.com`. Prod DB backed up first (`NotifiedTurns` confirmed to have no `lastPrompt` column + 7 live rows pre-deploy). `docker compose build` compiled all 6 Scala sources clean; `docker compose up -d` recreated `hrf-arcs`. Logs: `Started server.` with **no `ALTER TABLE ... IF EXISTS` crash-loop** (the RemindedTurns failure mode did not recur), stable 25+ min. Live behaviour confirmed: `watch.js` logs `notifying <game> <letter> up to <idx> "<prompt>"` unconditionally every poll for every waiting letter (new `PROMPT` line present), each followed server-side by `Skipping turn email for … already notified at index N` — stable repeated-poll waits stay silent, no duplicate emails. The new-round-with-recycled-prompt case is test-covered (`NotifyDecisionTest` / `NotifyRoutesTest`) and will surface in prod logs on the next real turn transition.
+>
+> Pre-existing Cloudflare render-flakiness (403 / `waitForFunction gave up` on some games) is unchanged and out of scope — its same-cycle retry fires as designed.
 
 > Read `NOTIFICATION_DEDUP_PLAN.md` for context; this is Prompt 7, the last step, following Prompts 1-6 all landed and green.
 >
@@ -175,4 +177,4 @@ Two bugs from earlier in the session are outside this refactor's direct scope bu
 - ✅ Both duplicated route blocks replaced by one shared helper (`TurnNotifier`, via `NotifyRoutes`).
 - ✅ `watch.js`'s `lastSeen` map is gone.
 - ✅ All regression-matrix cases above pass and are checked into the repo, not just verified manually.
-- ⏳ Production log evidence: a new-round transition with recycled prompt text correctly notifies; a stable multi-poll wait correctly doesn't. *(awaits the deploy)*
+- ✅ Production log evidence (2026-09-08 deploy): stable multi-poll waits correctly stay silent (`already notified at index N` after each unconditional `notifying`). New-round-with-recycled-prompt notify is test-covered; will confirm in prod logs on the next real turn transition.
