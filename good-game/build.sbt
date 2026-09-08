@@ -20,6 +20,10 @@ libraryDependencies += "org.hsqldb" % "hsqldb" % "2.7.4"
 
 libraryDependencies += "org.slf4j" % "slf4j-simple" % "2.0.16"
 
+libraryDependencies += "org.scalameta" %% "munit" % "1.0.4" % Test
+
+testFrameworks += new TestFramework("munit.Framework")
+
 run / fork := true
 
 Global / cancelable := true
