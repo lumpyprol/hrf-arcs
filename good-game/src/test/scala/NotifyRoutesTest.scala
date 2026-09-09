@@ -41,6 +41,7 @@ class NotifyRoutesTest extends munit.FunSuite {
                 GoodGame.accessRights.schema.create,
                 GoodGame.plays.schema.create,
                 GoodGame.notifiedTurns.schema.create,
+                GoodGame.remindedTurns.schema.create,
             )), 10.seconds)
             Await.result(db.run(GoodGame.journals ++= List(
                 Journal("Lobby", false, "", "", "lobby1"),
