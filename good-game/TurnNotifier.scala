@@ -95,6 +95,12 @@ class TurnNotifier(
         (targetUser, secret) match {
             case (Some(u), Some(s)) if u.email.exists(_.nonEmpty) =>
                 markNotified()
+                // A fresh turn email restarts the once-per-24h reminder clock:
+                // clear any RemindedTurns row so notify-reminder re-seeds it at
+                // "now" on its next poll. Without this, a turn that lands >24h
+                // after the player's previous turn fires "your turn" and
+                // "still your turn" simultaneously.
+                exec(remindedTurns.filter(n => n.journalId === journalId && n.userId === userId).delete)
                 val since = last.map(_.index).getOrElse(0)
                 val recentLog = logEntries.filter(_._1 > since).sortBy(_._1).map(_._2).takeRight(30)
                 val playerName = info.preferredName.getOrElse(u.name)

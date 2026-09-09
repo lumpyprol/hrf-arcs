@@ -172,6 +172,10 @@ Two bugs from earlier in the session are outside this refactor's direct scope bu
 - Deploy off-peak if possible; confirm `docker logs hrf-arcs` shows `Started server.` and stays stable for several minutes before considering it done, same as every fix this session.
 - After deploy, confirm via logs: a genuinely new transition fires `notifying`, and repeated polls of the same state don't.
 
+## Post-deploy follow-up (2026-09-08)
+
+Production produced a genuine double: "your turn" + "still your turn" at the same minute (game `mviulrdnzhrewnep`, a real new transition to index 617). Root cause: **pre-existing bug in the reminder feature**, not the dedup refactor — `notify-reminder`'s once-per-24h `RemindedTurns` clock was never reset when a fresh turn email went out, so any turn landing >24h after the player's previous turn fired both routes at once. Fix: `TurnNotifier.dispatch`, in the actual-send branch, now deletes the `(journalId, userId)` `RemindedTurns` row — `notify-reminder` re-seeds it at "now" on its next poll, so "still your turn" can only fire a full day after "your turn". Covered by two new `TurnNotifierTest` cases (send clears the row; a non-send leaves it alone). Suite 27/27.
+
 ## Definition of done
 - ✅ `sbt test` (25) and `node --test` (6) both green in CI-equivalent local run.
 - ✅ Both duplicated route blocks replaced by one shared helper (`TurnNotifier`, via `NotifyRoutes`).

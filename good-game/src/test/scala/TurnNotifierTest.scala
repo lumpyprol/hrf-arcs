@@ -42,6 +42,7 @@ class TurnNotifierTest extends munit.FunSuite {
                 GoodGame.accessRights.schema.create,
                 GoodGame.plays.schema.create,
                 GoodGame.notifiedTurns.schema.create,
+                GoodGame.remindedTurns.schema.create,
             )), Duration.Inf)
             // FK parents for Plays / NotifiedTurns
             Await.result(db.run(GoodGame.journals ++= List(
@@ -143,5 +144,36 @@ class TurnNotifierTest extends munit.FunSuite {
         r.notifier.dispatch("game1", "u1", "lobby1", 350, Some("Yellow leads"), Nil, info)
 
         assertEquals(r.sent.size, 2)
+    }
+
+    // ---- reminder-clock reset --------------------------------------------
+
+    rig.test("sending a turn email clears the RemindedTurns row (no double-fire with notify-reminder)") { r =>
+        seedUser(r.db, "u1", "Bob", Some("bob@example.test"))
+        seedPlay(r.db, "lobby1", "u1", "playsecret")
+        // stale reminder clock from a previous turn, > 24h old
+        Await.result(r.db.run(GoodGame.remindedTurns += GoodGame.RemindedTurn("game1", "u1", 1L)), Duration.Inf)
+
+        r.notifier.dispatch("game1", "u1", "lobby1", 10, Some("Blue leads"), Nil, info)
+
+        assertEquals(r.sent.size, 1)
+        val remaining = Await.result(r.db.run(
+            GoodGame.remindedTurns.filter(n => n.journalId === "game1" && n.userId === "u1").result
+        ), Duration.Inf)
+        assertEquals(remaining, Vector.empty)
+    }
+
+    rig.test("a dispatch that does not send (no email) leaves the RemindedTurns row alone") { r =>
+        seedUser(r.db, "u1", "Bob", None) // no email -> skip branch
+        seedPlay(r.db, "lobby1", "u1", "playsecret")
+        Await.result(r.db.run(GoodGame.remindedTurns += GoodGame.RemindedTurn("game1", "u1", 42L)), Duration.Inf)
+
+        r.notifier.dispatch("game1", "u1", "lobby1", 10, Some("Blue leads"), Nil, info)
+
+        assertEquals(r.sent.size, 0)
+        val remaining = Await.result(r.db.run(
+            GoodGame.remindedTurns.filter(n => n.journalId === "game1" && n.userId === "u1").map(_.lastSentAt).result
+        ), Duration.Inf)
+        assertEquals(remaining, Vector(42L))
     }
 }
